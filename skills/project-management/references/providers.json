@@ -1,0 +1,418 @@
+{
+  "_comment": "Provider registry for project-management skill. Add a new entry here to support a new tracker. Structurally compatible with issue-explore/references/providers.json but independent.",
+  "_mcp_scope_note": "All MCP servers are registered at --scope project (writes to .claude/settings.json). Never global/user scope — different projects may use different providers, workspace slugs, and project IDs.",
+  "_version": 1,
+
+  "providers": [
+    {
+      "name": "github",
+      "display": "GitHub",
+      "hostname_patterns": ["github.com", "*.github.com"],
+      "mcp_prefix": "mcp__github__",
+      "tool_contracts": {
+        "create_ticket":      "create_issue",
+        "update_ticket":      "update_issue",
+        "get_ticket":         "get_issue",
+        "list_tickets":       "list_issues",
+        "create_label":       "create_label",
+        "list_labels":        "list_labels_for_repo",
+        "add_label":          "add_labels_to_issue",
+        "create_milestone":   "create_milestone",
+        "list_milestones":    "list_milestones",
+        "sprint":             null,
+        "create_epic":        null,
+        "create_relation":    null,
+        "get_relation":       null
+      },
+      "milestone_contracts": {
+        "_note": "GitHub milestones serve both sprints (proxy) and release milestones. Distinguished by naming: 'Sprint N' vs 'v1.0'. Same API, different intent.",
+        "create":  "create_milestone",
+        "list":    "list_milestones",
+        "update":  "update_milestone",
+        "close":   "update_milestone",
+        "assign":  "update_issue"
+      },
+      "state_mapping": {
+        "backlog":     { "state": "open" },
+        "todo":        { "state": "open",   "label": "todo" },
+        "in-progress": { "state": "open",   "label": "in-progress" },
+        "in-review":   { "state": "open",   "label": "in-review" },
+        "done":        { "state": "closed" },
+        "blocked":     { "state": "open",   "label": "blocked" }
+      },
+      "plan_variants": {
+        "all": {
+          "epics": false,
+          "sprints": false,
+          "sprint_proxy": "milestone",
+          "milestones": true,
+          "relationships": false,
+          "sub_issues": false
+        }
+      },
+      "fallbacks": {
+        "epics": {
+          "strategy": "label",
+          "label_prefix": "epic:",
+          "description_note": "Part of epic: {slug}"
+        },
+        "sprint": {
+          "strategy": "milestone",
+          "description": "GitHub milestones are used as sprint proxies"
+        },
+        "relationships.blocks": {
+          "strategy": "comment",
+          "comment_format": "Blocks: #{issue_id}"
+        },
+        "relationships.blocked_by": {
+          "strategy": "comment",
+          "comment_format": "Blocked by: #{issue_id}"
+        },
+        "relationships.relates_to": {
+          "strategy": "label",
+          "label_format": "relates:#{issue_id}"
+        },
+        "sub_issues": {
+          "strategy": "label",
+          "label_format": "child:#{parent_id}",
+          "description_note": "Sub-issue of: #{parent_id}"
+        }
+      },
+      "mcp_setup": {
+        "transport": "http",
+        "default_url": "https://api.githubcopilot.com/mcp/",
+        "self_hosted_url_pattern": "{instance_url}/mcp/",
+        "self_hosted_note": "GitHub Enterprise Server requires local deployment — no remote HTTP MCP available.",
+        "auth_methods": ["oauth", "pat"],
+        "default_auth": "oauth",
+        "install_commands": {
+          "oauth": "claude mcp add github --scope project -t http --url https://api.githubcopilot.com/mcp/",
+          "pat":   "claude mcp add github --scope project -t http --url https://api.githubcopilot.com/mcp/ --header \"Authorization=Bearer {token}\""
+        },
+        "oauth_note": "OAuth is recommended — completes via browser on first use.",
+        "pat_prompt": "Enter your GitHub Personal Access Token (repo scope):",
+        "pat_url": "https://github.com/settings/tokens/new?scopes=repo",
+        "required_env": [],
+        "optional_env": [],
+        "restart_required": false,
+        "docs": "https://github.com/github/github-mcp-server"
+      },
+      "probe_endpoints": {
+        "epics":         null,
+        "sprints":       null,
+        "milestones":    "list_milestones",
+        "relationships": null,
+        "sub_issues":    null
+      },
+      "reference_file": "references/github.md"
+    },
+
+    {
+      "name": "gitlab",
+      "display": "GitLab",
+      "hostname_patterns": ["gitlab.com", "*.gitlab.com", "*gitlab*"],
+      "mcp_prefix": "mcp__gitlab__",
+      "tool_contracts": {
+        "create_ticket":      "create_issue",
+        "update_ticket":      "update_issue",
+        "get_ticket":         "get_issue",
+        "list_tickets":       "list_issues",
+        "create_label":       "create_label",
+        "list_labels":        "list_labels",
+        "add_label":          "update_issue",
+        "create_milestone":   "create_milestone",
+        "list_milestones":    "list_milestones",
+        "sprint":             "create_milestone",
+        "create_epic":        "create_epic",
+        "create_relation":    "create_issue_link",
+        "get_relation":       "list_issue_links"
+      },
+      "milestone_contracts": {
+        "_note": "GitLab milestones serve both sprints and release milestones. Distinguished by naming: 'Sprint N' vs 'v1.0'.",
+        "create":  "create_milestone",
+        "list":    "list_milestones",
+        "update":  "update_milestone",
+        "close":   "update_milestone",
+        "assign":  "update_issue"
+      },
+      "state_mapping": {
+        "backlog":     { "state": "opened" },
+        "todo":        { "state": "opened", "label": "To Do" },
+        "in-progress": { "state": "opened", "label": "In Progress" },
+        "in-review":   { "state": "opened", "label": "In Review" },
+        "done":        { "state": "closed" },
+        "blocked":     { "state": "opened", "label": "Blocked" }
+      },
+      "plan_variants": {
+        "ce": {
+          "epics": false,
+          "sprints": true,
+          "sprint_proxy": "milestone",
+          "milestones": true,
+          "relationships": false,
+          "sub_issues": true
+        },
+        "ee": {
+          "epics": true,
+          "sprints": true,
+          "sprint_proxy": "milestone",
+          "milestones": true,
+          "relationships": true,
+          "sub_issues": true
+        }
+      },
+      "fallbacks": {
+        "epics": {
+          "strategy": "label",
+          "label_prefix": "epic:",
+          "description_note": "Part of epic: {slug}"
+        },
+        "relationships.blocks": {
+          "strategy": "comment",
+          "comment_format": "Blocks: #{issue_id}"
+        },
+        "relationships.relates_to": {
+          "strategy": "label",
+          "label_format": "relates:#{issue_id}"
+        }
+      },
+      "mcp_setup": {
+        "transport": "http",
+        "default_url": "https://gitlab.com/api/v4/mcp",
+        "self_hosted_url_pattern": "{instance_url}/api/v4/mcp",
+        "self_hosted_note": "Replace {instance_url} with your GitLab instance URL.",
+        "auth_methods": ["oauth"],
+        "default_auth": "oauth",
+        "install_commands": {
+          "oauth": "claude mcp add gitlab --scope project --transport http {url}"
+        },
+        "oauth_note": "OAuth 2.0 Dynamic Client Registration — completes via browser on first use. Run /mcp in Claude to trigger.",
+        "required_env": [],
+        "optional_env": [],
+        "restart_required": false,
+        "docs": "https://docs.gitlab.com/editor_extensions/gitlab_mcp_server/"
+      },
+      "probe_endpoints": {
+        "epics":         "list_epics",
+        "sprints":       "list_milestones",
+        "milestones":    "list_milestones",
+        "relationships": "list_issue_links",
+        "sub_issues":    "list_issues"
+      },
+      "reference_file": "references/gitlab.md"
+    },
+
+    {
+      "name": "jira",
+      "display": "Jira",
+      "hostname_patterns": ["*.atlassian.net", "jira.*"],
+      "key_format": "^[A-Z][A-Z0-9_]+-\\d+$",
+      "mcp_prefix": "mcp__jira__",
+      "tool_contracts": {
+        "create_ticket":      "create_issue",
+        "update_ticket":      "update_issue",
+        "get_ticket":         "get_issue",
+        "list_tickets":       "search_issues",
+        "create_label":       null,
+        "list_labels":        "get_fields",
+        "add_label":          "update_issue",
+        "create_milestone":   null,
+        "list_milestones":    null,
+        "sprint":             "create_sprint",
+        "create_fix_version": "create_version",
+        "list_fix_versions":  "list_versions",
+        "update_fix_version": "update_version",
+        "list_sprints":       "list_sprints_for_board",
+        "list_boards":        "list_boards",
+        "create_epic":        "create_issue",
+        "create_relation":    "create_issue_link",
+        "get_relation":       "get_issue_links"
+      },
+      "state_mapping": {
+        "backlog":     { "transition": "Backlog" },
+        "todo":        { "transition": "To Do" },
+        "in-progress": { "transition": "In Progress" },
+        "in-review":   { "transition": "In Review" },
+        "done":        { "transition": "Done" },
+        "blocked":     { "label": "blocked" }
+      },
+      "milestone_contracts": {
+        "_note": "Jira milestones = Fix Versions. Native, separate from sprints.",
+        "create":  "create_version",
+        "list":    "list_versions",
+        "update":  "update_version",
+        "close":   "update_version",
+        "assign":  "update_issue"
+      },
+      "plan_variants": {
+        "software": {
+          "epics": true,
+          "sprints": true,
+          "sprint_proxy": null,
+          "milestones": true,
+          "relationships": true,
+          "sub_issues": true
+        },
+        "core": {
+          "epics": false,
+          "sprints": false,
+          "sprint_proxy": null,
+          "milestones": true,
+          "relationships": true,
+          "sub_issues": true
+        }
+      },
+      "fallbacks": {
+        "epics": {
+          "strategy": "label",
+          "label_prefix": "epic:",
+          "description_note": "Part of epic: {slug}"
+        },
+        "sprint": {
+          "strategy": "label",
+          "label_prefix": "sprint:",
+          "description": "Jira Core does not support sprints — using labels as sprint proxy"
+        }
+      },
+      "mcp_setup": {
+        "transport": "http",
+        "default_url": "https://mcp.atlassian.com/v1/mcp/authv2",
+        "deprecated_url": "https://mcp.atlassian.com/v1/sse",
+        "deprecated_note": "SSE endpoint deprecated — migrates to authv2 after 2026-06-30.",
+        "self_hosted_note": "Jira Data Center / Server requires self-hosted MCP deployment.",
+        "auth_methods": ["oauth", "api_token"],
+        "default_auth": "oauth",
+        "install_commands": {
+          "oauth":     "claude mcp add jira --scope project --transport http https://mcp.atlassian.com/v1/mcp/authv2",
+          "api_token": "claude mcp add jira --scope project --transport http https://mcp.atlassian.com/v1/mcp/authv2 --header \"Authorization=Basic {base64_email_token}\""
+        },
+        "oauth_note": "OAuth 2.1 — completes via browser on first use.",
+        "api_token_note": "base64 encode 'email:api_token' — echo -n 'email:token' | base64",
+        "api_token_url": "https://id.atlassian.com/manage-profile/security/api-tokens",
+        "required_env": [],
+        "optional_env": [],
+        "restart_required": false,
+        "docs": "https://support.atlassian.com/atlassian-rovo-mcp-server/docs/getting-started-with-the-atlassian-remote-mcp-server/"
+      },
+      "probe_endpoints": {
+        "epics":         "get_issue",
+        "sprints":       "list_boards",
+        "milestones":    "list_versions",
+        "relationships": "get_issue_links",
+        "sub_issues":    "get_issue"
+      },
+      "jira_extras": {
+        "board_id_required_for_sprint": true,
+        "epic_issue_type": "Epic",
+        "relation_types": ["Blocks", "Relates", "Clones", "Duplicates"]
+      },
+      "reference_file": "references/jira.md"
+    },
+
+    {
+      "name": "plane",
+      "display": "Plane",
+      "hostname_patterns": ["app.plane.so", "*.plane.so"],
+      "mcp_prefix": "mcp__plane__",
+      "tool_contracts": {
+        "create_ticket":      "create_issue",
+        "update_ticket":      "update_issue",
+        "get_ticket":         "get_issue",
+        "list_tickets":       "list_issues",
+        "create_label":       "create_label",
+        "list_labels":        "list_labels",
+        "add_label":          "update_issue",
+        "create_milestone":   null,
+        "list_milestones":    null,
+        "sprint":             "create_cycle",
+        "create_fix_version": null,
+        "list_fix_versions":  null,
+        "list_sprints":       "list_cycles",
+        "create_epic":        "create_module",
+        "list_epics":         "list_modules",
+        "create_relation":    "create_issue_relation",
+        "get_relation":       "list_issue_relations"
+      },
+      "state_mapping": {
+        "backlog":     { "state_name": "Backlog" },
+        "todo":        { "state_name": "Unstarted" },
+        "in-progress": { "state_name": "In Progress" },
+        "in-review":   { "state_name": "In Progress", "label": "in-review" },
+        "done":        { "state_name": "Done" },
+        "blocked":     { "state_name": "In Progress", "label": "blocked" }
+      },
+      "milestone_contracts": {
+        "_note": "Plane has no native milestone concept. Label fallback used.",
+        "create":  null,
+        "list":    null,
+        "update":  null,
+        "close":   null,
+        "assign":  null
+      },
+      "plan_variants": {
+        "free": {
+          "epics": false,
+          "sprints": true,
+          "sprint_proxy": null,
+          "milestones": false,
+          "relationships": true,
+          "sub_issues": true
+        },
+        "pro": {
+          "epics": true,
+          "sprints": true,
+          "sprint_proxy": null,
+          "milestones": false,
+          "relationships": true,
+          "sub_issues": true
+        }
+      },
+      "fallbacks": {
+        "epics": {
+          "strategy": "label",
+          "label_prefix": "epic:",
+          "description_note": "Part of epic: {slug}"
+        },
+        "milestone": {
+          "strategy": "label",
+          "label_prefix": "milestone:",
+          "description_note": "Target milestone: {slug}"
+        }
+      },
+      "mcp_setup": {
+        "transport": "http",
+        "default_url": "https://mcp.plane.so/http/api-key/mcp",
+        "self_hosted_url": "{instance_url}/http/api-key/mcp",
+        "self_hosted_note": "Replace {instance_url} with your self-hosted Plane instance base URL.",
+        "auth_methods": ["api_key_header"],
+        "default_auth": "api_key_header",
+        "install_commands": {
+          "api_key_header": "claude mcp add plane --scope project --transport http {url} --header \"x-api-key={api_key}\""
+        },
+        "api_key_prompt": "Enter your Plane API key (from workspace Settings → API Tokens):",
+        "required_env": [
+          {
+            "name": "PLANE_WORKSPACE_SLUG",
+            "description": "Your workspace slug (visible in Plane URL: app.plane.so/{slug})"
+          }
+        ],
+        "optional_env": [
+          {
+            "name": "PLANE_PROJECT_ID",
+            "description": "Project ID — can also be set per-project in .project/config.yaml"
+          }
+        ],
+        "restart_required": false,
+        "docs": "https://developers.plane.so/dev-tools/mcp-server"
+      },
+      "probe_endpoints": {
+        "epics":         "list_modules",
+        "sprints":       "list_cycles",
+        "milestones":    null,
+        "relationships": "list_issue_relations",
+        "sub_issues":    "list_issues"
+      },
+      "reference_file": "references/plane.md"
+    }
+  ]
+}

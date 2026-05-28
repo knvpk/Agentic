@@ -1,0 +1,73 @@
+{
+  "_comment": "Provider registry for issue-explore. Add a new entry here to support a new tracker — no edits to SKILL.md needed for detection and fetch-method wiring.",
+  "_version": 1,
+
+  "providers": [
+    {
+      "name": "github",
+      "display": "GitHub",
+      "hostname_patterns": ["github.com", "*.github.com"],
+      "key_format": null,
+      "project_ref_format": "owner/repo",
+      "issue_ref_format": "owner/repo#NNN",
+      "cli_tool": "gh",
+      "token_env": "GITHUB_TOKEN",
+      "mcp_prefix": "mcp__github__",
+      "reference_file": "references/github.md",
+      "url_path_patterns": [
+        "/([^/]+/[^/]+)/issues/(\\d+)"
+      ]
+    },
+    {
+      "name": "gitlab",
+      "display": "GitLab",
+      "hostname_patterns": ["gitlab.com", "*.gitlab.com", "*gitlab*"],
+      "key_format": null,
+      "project_ref_format": "group/project",
+      "issue_ref_format": "group/project#NNN",
+      "cli_tool": "glab",
+      "token_env": "GITLAB_TOKEN",
+      "mcp_prefix": "mcp__gitlab__",
+      "reference_file": "references/gitlab.md",
+      "url_path_patterns": [
+        "/(.+)/-/issues/(\\d+)",
+        "/(.+)/issues/(\\d+)"
+      ]
+    },
+    {
+      "name": "jira",
+      "display": "Jira",
+      "hostname_patterns": ["*.atlassian.net", "jira.*"],
+      "key_format": "^[A-Z][A-Z0-9_]+-\\d+$",
+      "project_ref_format": "PROJECT",
+      "issue_ref_format": "PROJ-NNN",
+      "cli_tool": "jira",
+      "token_env": "JIRA_TOKEN",
+      "mcp_prefix": "mcp__jira__",
+      "reference_file": "references/jira.md",
+      "url_path_patterns": [
+        "/browse/([A-Z][A-Z0-9_]+-\\d+)",
+        "/jira/software/projects/[^/]+/issue/([A-Z][A-Z0-9_]+-\\d+)",
+        "/jira/core/projects/[^/]+/issue/([A-Z][A-Z0-9_]+-\\d+)",
+        "/issues/([A-Z][A-Z0-9_]+-\\d+)"
+      ]
+    },
+    {
+      "name": "plane",
+      "display": "Plane",
+      "hostname_patterns": ["app.plane.so", "*.plane.so"],
+      "key_format": null,
+      "project_ref_format": "workspace-slug/projects/project-uuid",
+      "issue_ref_format": "workspace-slug/projects/project-uuid/issues/issue-uuid",
+      "cli_tool": "plane",
+      "token_env": "PLANE_API_TOKEN",
+      "mcp_prefix": "mcp__plane__",
+      "reference_file": "references/plane.md",
+      "url_path_patterns": [
+        "/([^/]+/projects/[^/]+)/issues/([^/?#]+)"
+      ]
+    }
+  ],
+
+  "_adding_providers": "See references/adding-providers.md. Add a new object to the 'providers' array above. hostname_patterns supports exact match and fnmatch-style wildcards. key_format is a regex for shorthand keys (Jira-style); set null if not applicable. url_path_patterns are tried in order; the first match wins — add new patterns at the front, never delete old ones."
+}

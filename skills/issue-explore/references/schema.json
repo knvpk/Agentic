@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "issue-explore/schema.json",
+  "title": "NormalizedIssue",
+  "description": "Canonical issue shape written to /tmp/ii_normalized.json by every provider after fetching. All consumers (SKILL.md Steps 3-6) read only this file.",
+  "type": "object",
+  "required": ["id", "title", "state", "url", "author", "assignees", "labels", "description", "comments", "linked_issues", "issue_type", "provider", "fetched_via"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Canonical issue identifier: Jira key (PROJ-123), GitLab/GitHub number as string"
+    },
+    "title": { "type": "string" },
+    "state": {
+      "type": "string",
+      "enum": ["open", "closed", "in_progress", "unknown"],
+      "description": "Normalized across providers. GitLab 'opened'→'open'. Jira 'In Progress'→'in_progress', 'Done'/'Resolved'/'Closed'→'closed', else 'open'."
+    },
+    "url": {
+      "type": "string",
+      "description": "Canonical web URL to open the issue in a browser"
+    },
+    "author": {
+      "type": "string",
+      "description": "Display name or username of the reporter/creator"
+    },
+    "assignees": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Display names or usernames of current assignees"
+    },
+    "labels": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Label names. For Jira: labels + component names combined."
+    },
+    "description": {
+      "type": "string",
+      "description": "Plain text body. ADF (Jira) must be flattened before writing here."
+    },
+    "comments": {
+      "type": "array",
+      "maxItems": 10,
+      "description": "Human comments only, ascending order, max 10.",
+      "items": {
+        "type": "object",
+        "required": ["author", "body"],
+        "properties": {
+          "author": { "type": "string" },
+          "body":   { "type": "string", "description": "Truncated to 400 chars" }
+        }
+      }
+    },
+    "linked_issues": {
+      "type": "array",
+      "maxItems": 5,
+      "description": "Related/linked issues. Empty array if description was sufficient and Step C was skipped.",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "state", "summary"],
+        "properties": {
+          "id":      { "type": "string" },
+          "title":   { "type": "string" },
+          "state":   { "type": "string", "enum": ["open", "closed", "in_progress", "unknown"] },
+          "summary": { "type": "string", "description": "Truncated description, max 400 chars" }
+        }
+      }
+    },
+    "issue_type": {
+      "type": "string",
+      "enum": ["bug", "feature", "task", "unknown"],
+      "description": "Derived from issue type field (Jira: issuetype.name) or labels (GitLab/GitHub). Used to choose branch prefix: bug/ or feature/."
+    },
+    "provider":    { "type": "string", "enum": ["gitlab", "github", "jira", "plane"] },
+    "fetched_via": { "type": "string", "enum": ["cli", "mcp", "api"] },
+    "custom_fields": {
+      "type": "object",
+      "description": "Optional provider-specific fields (e.g. priority, sprint, story points). Key-value pairs rendered under '--- Provider Fields ---' in Step 6.",
+      "additionalProperties": { "type": "string" }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,17 @@
+services:
+  cache:
+    image: valkey/valkey:9.0.3-alpine
+    restart: unless-stopped
+    networks:
+     -  main
+    volumes:
+      - cache_data:/data
+    command: valkey-server --requirepass ${CACHE_AUTH}
+    healthcheck:
+      test: ['CMD', 'valkey-cli', '-a', '${CACHE_AUTH}', 'ping']
+      interval: 3s
+      timeout: 10s
+      retries: 10
+
+volumes:
+  cache_data:

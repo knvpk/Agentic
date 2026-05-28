@@ -1,0 +1,16 @@
+
+services:
+  
+  tempo:
+    image: grafana/tempo:latest
+    volumes:
+      - ./config.yaml:/etc/tempo/config.yaml
+      - tempo_data:/var/tempo
+    command: ["--config.file=/etc/tempo/config.yaml"]
+    networks:
+      - main
+    labels:
+      - "layer=observability"
+  
+volumes:
+  tempo_data:

@@ -1,0 +1,8 @@
+services:
+  otel:
+    image: docker.hyperdx.io/hyperdx/hyperdx-local:2-beta
+    restart: always
+    networks:
+      - main
+    labels:
+      - "layer=observability"

@@ -1,0 +1,10 @@
+[gateway]
+export.otlp.traces.enabled = true
+
+[functions.sample]
+type = "chat"
+
+[functions.sample.variants.gpt_4o_mini]
+type = "chat_completion"
+model = "openai::gpt-4o-mini"
+system_template = "functions/sample/initial_prompt/system_template.minijinja"

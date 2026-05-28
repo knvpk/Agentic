@@ -1,0 +1,33 @@
+services:
+  hermes_gateway:
+    # image: nousresearch/hermes-agent:latest
+    build: .
+    volumes:
+      - hermes_data:/opt/data
+    command: gateway run
+    user: "hermes"
+    environment:
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN}
+      DISCORD_ALLOWED_USERS: ${DISCORD_USER_ID}
+      DISCORD_HOME_CHANNEL: "1497437487797239839"
+      DISCORD_FREE_RESPONSE_CHANNELS: "1497437487797239839"
+      OPENVIKING_ENDPOINT: http://cs:1933
+    networks:
+      - main
+    depends_on:
+      - cs
+
+  hermes_dashboard:
+    image: nousresearch/hermes-agent:latest
+    volumes:
+      - hermes_data:/opt/data
+    command: dashboard --host 0.0.0.0 --insecure
+    environment:
+      GATEWAY_HEALTH_URL: "http://hermes_gateway:8642"
+    networks:
+      - main
+    depends_on:
+      - hermes_gateway
+
+volumes:
+  hermes_data:

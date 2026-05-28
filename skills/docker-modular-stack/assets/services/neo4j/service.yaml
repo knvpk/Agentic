@@ -1,0 +1,19 @@
+services:
+  graph_db:
+    image: neo4j:2026.04.0-community-trixie
+    volumes:
+      - graph_db_data:/data
+      - graph_db_logs:/logs
+      # - ./config:/var/lib/neo4j/conf
+    environment:
+      NEO4J_AUTH: "${GRAPH_DB_USER}/${GRAPH_DB_PASSWORD}"
+      NEO4J_dbms_memory_heap_max__size: 512M
+    restart: unless-stopped
+    networks:
+      - main
+    labels:
+      - "layer=data"
+
+volumes:
+  graph_db_data:
+  graph_db_logs:

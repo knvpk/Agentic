@@ -1,0 +1,10 @@
+PLACEHOLDER_DNS_ZONE {
+    docker {
+        zone PLACEHOLDER_DNS_ZONE
+        networks PLACEHOLDER_COMPOSE_NETWORK
+        ttl 30
+    }
+    log
+    errors
+    cache 10
+}

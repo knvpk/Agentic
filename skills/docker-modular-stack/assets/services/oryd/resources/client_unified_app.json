@@ -1,0 +1,18 @@
+{
+    "client_id": "29d3571e-6c68-460c-a3e2-e5dc4ab85bbe",
+    "client_name": "unified_app",
+    "grant_type": [
+        "authorization_code",
+        "refresh_token"
+    ],
+    "logo_uri": "",
+    "scope": "openid profile offline email",
+    "response_types": [
+        "code",
+        "token"
+    ],
+    "skip_consent": false,
+    "redirect-uris": [
+        "http://localhost:3000/oauth2/callback"
+    ]
+}

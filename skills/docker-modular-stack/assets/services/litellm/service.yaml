@@ -1,0 +1,52 @@
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:v1.83.14-stable
+    command:
+      - "--config=/app/config.yaml"
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY}
+      # LITELLM_LOG: ${DEBUG}
+      DATABASE_URL: "postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/litellm"
+      STORE_MODEL_IN_DB: "True"
+      # AWS_PROFILE: ${AWS_PROFILE:-default}
+      REDIS_HOST: cache
+      REDIS_PORT: 6379
+      # REDIS_PASSWORD: ${CACHE_AUTH}
+      AWS_ACCESS_KEY_ID: ${APP_AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${APP_AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${APP_AWS_REGION:-us-east-1}
+      UI_USERNAME: admin
+      UI_PASSWORD: ${LITELLM_UI_PASSWORD:-Simple123}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OTEL_TRACER_NAME: litellm
+      OTEL_SERVICE_NAME: litellm
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317/v1/traces"
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OAUTH_PROVIDER: "auth0"
+      GENERIC_CLIENT_ID: ${LITELLM_SSO_CLIENT_ID}
+      GENERIC_CLIENT_SECRET: ${LITELLM_SSO_CLIENT_SECRET}
+      GENERIC_TOKEN_ENDPOINT: "http://idp_server:9000/application/o/token/"
+      GENERIC_USERINFO_ENDPOINT: "http://idp_server:9000/application/o/userinfo/"
+      GENERIC_AUTHORIZATION_ENDPOINT: "http://PLACEHOLDER_DNS_ZONE:9000/application/o/authorize/"
+      GENERIC_SCOPE: "openid profile email litellm_role"
+      GENERIC_USER_ROLE_ATTRIBUTE: "litellm_role"
+      AUTO_REDIRECT_UI_LOGIN_TO_SSO: "false"
+      # ANTHROPIC_API_KEY: ${CLAUDE_CODE_OAUTH_TOKEN}
+    volumes:
+      # - ./.aws:/root/.aws:ro
+      - ./config.yaml:/app/config.yaml
+    depends_on:
+      - db
+    networks:
+      - main
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget --no-verbose --tries=1 http://localhost:4000/health/liveliness || exit 1",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

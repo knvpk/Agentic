@@ -1,0 +1,16 @@
+services:
+  graphiti:
+    image: zepai/knowledge-graph-mcp:standalone
+    command: ["uv", "run", "main.py"]
+    environment:
+      FALKORDB_URI: "redis://graph_db1_server:6379"
+      FALKORDB_PASSWORD: ""
+      GRAPHITI_GROUP_ID: "main"
+      CONFIG_PATH: /app/mcp/config/config.yaml
+    volumes:
+      - ./config.yaml:/app/mcp/config/config.yaml
+    networks:
+      - main
+    depends_on:
+      graph_db1_server:
+        condition: service_healthy

@@ -1,0 +1,34 @@
+services:
+  graph_db1_server:
+    image: falkordb/falkordb-server:v4.18.3-alpine
+    environment:
+      REDIS_ARGS: "--requirepass ${GRAPH_DB1_PASSWORD}"
+      FALKORDB_ARGS: "THREAD_COUNT 4"
+      GRAPH_DB1_PASSWORD: ${GRAPH_DB1_PASSWORD}
+    volumes:
+      - graph_db1_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${GRAPH_DB1_PASSWORD}", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - main
+
+  graph_db1_browser:
+    image: falkordb/falkordb-browser:v2.0.3
+    environment:
+      FALKORDB_URL: redis://graph_db1_server:6379
+      FALKORDB_PASSWORD: ${GRAPH_DB1_PASSWORD}
+      ENCRYPTION_KEY: ${GRAPH_DB1_ENCRYPTION_KEY}
+    user: root
+    depends_on:
+      - graph_db1_server
+    restart: unless-stopped
+    networks:
+      - main
+
+volumes:
+  graph_db1_data:

@@ -1,0 +1,11 @@
+services:
+  coredns:
+    build:
+      context: .
+    restart: unless-stopped
+    networks:
+      main:
+        ipv4_address: 10.8.255.254
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./Corefile:/Corefile:ro

@@ -1,0 +1,40 @@
+services:
+  idp_server: &idp
+    image: ghcr.io/goauthentik/server:2026.2.3-rc1
+    restart: unless-stopped
+    command: server
+    environment:
+      AUTHENTIK_SECRET_KEY: ${IDP_SECRET_KEY}
+      AUTHENTIK_REDIS__HOST: cache
+      AUTHENTIK_REDIS__PASSWORD: ${CACHE_AUTH}
+      AUTHENTIK_POSTGRESQL__HOST: db
+      AUTHENTIK_POSTGRESQL__USER: ${DB_USER}
+      AUTHENTIK_POSTGRESQL__NAME: "authentik"
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${DB_PASSWORD}
+      AUTHENTIK_BOOTSTRAP_PASSWORD: ${IDP_PASSWORD}
+      AUTHENTIK_BOOTSTRAP_TOKEN: ${IDP_TOKEN}
+      AUTHENTIK_EMAIL__HOST: mail
+      AUTHENTIK_EMAIL__PORT: 1025
+      AUTHENTIK_EMAIL__USE_TLS: false
+      AUTHENTIK_EMAIL__USE_SSL: false
+      AUTHENTIK_EMAIL__FROM: idp@ai_playground.dev
+    # volumes:
+    #   - ./media:/media
+    #   - ./custom-templates:/templates
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+    networks:
+      - main
+
+  idp_worker:
+    <<: *idp
+    command: worker
+    user: root
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # - ./media:/media
+      # - ./certs:/certs
+      # - ./custom-templates:/templates

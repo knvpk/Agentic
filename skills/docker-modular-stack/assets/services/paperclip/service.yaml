@@ -1,0 +1,35 @@
+services:
+  paperclip:
+    # image: ghcr.io/paperclipai/paperclip:latest
+    build: .
+    environment:
+      HOST: "0.0.0.0"
+      PAPERCLIP_HOME: "/paperclip"
+      PAPERCLIP_DEPLOYMENT_MODE: "authenticated"
+      PAPERCLIP_DEPLOYMENT_EXPOSURE: "private"
+      PAPERCLIP_PUBLIC_URL: "http://localhost:3101"
+      BETTER_AUTH_SECRET: ${PAPERCLIP_AUTH_SECRET}
+      PAPERCLIP_SECRETS_MASTER_KEY: ${PAPERCLIP_MASTER_KEY}
+      DATABASE_URL: "postgres://${DB_USER }:${DB_PASSWORD}@db:5432/paperclip"
+      PAPERCLIP_STORAGE_PROVIDER: "s3"
+      PAPERCLIP_STORAGE_S3_BUCKET: "paperclip"
+      PAPERCLIP_STORAGE_S3_ENDPOINT: "http://os:9000"
+      PAPERCLIP_STORAGE_S3_REGION: "us-east-1"
+      PAPERCLIP_STORAGE_S3_FORCE_PATH_STYLE: "true"
+      AWS_ACCESS_KEY_ID: ${OS_USERNAME}
+      AWS_SECRET_ACCESS_KEY: ${OS_PASSWORD}
+      AWS_REGION: "us-east-1"
+      GITLAB_URL: "${GITLAB_URL}"
+      GITLAB_TOKEN: ${GITLAB_TOKEN}
+    volumes:
+      - paperclip_data:/paperclip
+      - ../../ai:/app/ai:ro
+    networks:
+      - main
+    depends_on:
+      - db
+      - cache
+      - os
+
+volumes:
+  paperclip_data:

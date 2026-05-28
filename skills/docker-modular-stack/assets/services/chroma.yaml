@@ -1,0 +1,17 @@
+
+services:
+  vector_db:
+    image: chromadb/chroma:1.5.9.dev48
+    volumes:
+      - vector_db_data:/chroma/chroma
+    networks:
+      - main
+    labels:
+      - "layer=data"
+    environment:
+      IS_PERSISTENT: TRUE
+      PERSIST_DIRECTORY: /chroma/chroma # this is the default path, change it as needed
+      ANONYMIZED_TELEMETRY: ${ANONYMIZED_TELEMETRY:-TRUE}
+
+volumes:
+  vector_db_data:

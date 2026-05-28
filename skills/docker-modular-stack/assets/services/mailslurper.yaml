@@ -1,0 +1,5 @@
+services:
+  mail1:
+    image: ghcr.io/mailslurper/mailslurper:latest
+    networks:
+      - main

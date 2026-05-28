@@ -1,0 +1,8 @@
+
+services:
+  inspector:
+    image: ghcr.io/modelcontextprotocol/inspector:0.21.2-hotfix-3
+    environment:
+      HOST: "0.0.0.0"
+    networks:
+      - main

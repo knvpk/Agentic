@@ -1,0 +1,55 @@
+services:
+  prefect_server:
+    image: prefecthq/prefect:3-latest
+    restart: unless-stopped
+    command: prefect server start --no-services
+    environment:
+      PREFECT_SERVER_UI_API_URL: http://127.0.0.1:4200/api
+      PREFECT_SERVER_API_HOST: 0.0.0.0
+      PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://$DB_USER:$DB_PASSWORD@db:5432/prefect
+      PREFECT_MESSAGING_BROKER: prefect_redis.messaging
+      PREFECT_MESSAGING_CACHE: prefect_redis.messaging
+      PREFECT_REDIS_MESSAGING_HOST: cache
+      PREFECT_REDIS_MESSAGING_PORT: 6379
+      PREFECT_REDIS_MESSAGING_DB: 0
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+    networks:
+      - main
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:4200/api/health', timeout=1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  prefect_services:
+    image: prefecthq/prefect:3-latest
+    depends_on:
+      prefect_server:
+        condition: service_healthy
+    environment:
+      PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://$DB_USER:$DB_PASSWORD@db:5432/prefect
+      PREFECT_MESSAGING_BROKER: prefect_redis.messaging
+      PREFECT_MESSAGING_CACHE: prefect_redis.messaging
+      PREFECT_REDIS_MESSAGING_HOST: cache
+      PREFECT_REDIS_MESSAGING_PORT: 6379
+      PREFECT_REDIS_MESSAGING_DB: 0
+    command: prefect server services start
+    networks:
+      - main
+
+  prefect_worker:
+    image: prefecthq/prefect:3-latest
+    depends_on:
+      prefect_server:
+        condition: service_healthy
+    environment:
+      PREFECT_API_URL: http://prefect_server:4200/api
+    command: prefect worker start --pool local-pool
+    restart: on-failure
+    networks:
+      - main

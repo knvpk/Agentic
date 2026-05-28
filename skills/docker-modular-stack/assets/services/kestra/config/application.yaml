@@ -1,0 +1,36 @@
+datasources:
+  postgres:
+    url: jdbc:postgresql://db:5432/kestra
+    driverClassName: org.postgresql.Driver
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+
+kestra:
+  server:
+    basicAuth:
+      enabled: false
+  repository:
+    type: postgres
+  storage:
+    type: local
+    local:
+      basePath: /app/storage
+  queue:
+    type: postgres
+  tasks:
+    tmpDir:
+      path: /tmp/kestra-wd/tmp
+  url: http://localhost:8080/
+
+management:
+  tracing:
+    enabled: true
+    sampling:
+      probability: 1.0
+  otlp:
+    tracing:
+      endpoint: http://tempo:4318
+    metrics:
+      export:
+        enabled: true
+        step: 10s

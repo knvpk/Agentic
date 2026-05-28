@@ -1,0 +1,30 @@
+services:
+  graphql-engine:
+    image: hasura/graphql-engine:v2.46.0
+    restart: always
+    environment:
+      HASURA_METADATA_DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@db:5432/hasura
+      PG_DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+      HASURA_GRAPHQL_ENABLE_CONSOLE: "true"
+      HASURA_GRAPHQL_DEV_MODE: "true"
+      HASURA_GRAPHQL_ENABLED_LOG_TYPES: startup, http-log, webhook-log, websocket-log, query-log
+      HASURA_GRAPHQL_ADMIN_SECRET: ${HASURA_GRAPHQL_ADMIN_SECRET:-myhasurasecret}
+      HASURA_GRAPHQL_JWT_SECRETS: |
+        [
+          {
+            "type": "RS256",
+            "jwk_url": "${HASURA_JWT_ISSUER}/.well-known/jwks.json",
+            "audience": "${HASURA_JWT_AUDIENCE:-myjwtaudience}",
+            "issuer": "${HASURA_JWT_ISSUER:-myjwtissuer}"
+          }
+        ]
+      HASURA_GRAPHQL_ENABLE_TELEMETRY: "true"
+      HASURA_GRAPHQL_ENABLED_APIS: "metadata,graphql,config"
+      HASURA_GRAPHQL_LOG_LEVEL: "debug"
+      HASURA_GRAPHQL_OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+      HASURA_GRAPHQL_OTEL_SERVICE_NAME: "hasura"
+      HASURA_GRAPHQL_OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"  
+    depends_on:
+      db:
+        condition: service_healthy
+  

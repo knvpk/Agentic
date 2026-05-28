@@ -1,0 +1,49 @@
+services:
+  tensorzero_gw:
+    image: tensorzero/gateway:2026.4.1
+    volumes:
+      - ./config:/app/config:ro
+    command: --config-file /app/config/tensorzero.toml
+    environment:
+      TENSORZERO_CLICKHOUSE_URL: http://${ANALYTICS_DB_USER}:${ANALYTICS_DB_PASSWORD}@analytics_db:8123/tensorzero
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      AWS_ACCESS_KEY_ID: ${APP_AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${APP_AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${APP_AWS_REGION:-us-east-1}
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector:4317/v1/traces"
+    networks:
+      - main
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:3000/health",
+        ]
+      start_period: 1s
+      start_interval: 1s
+      timeout: 1s
+    depends_on:
+      analytics_db:
+        condition: service_healthy
+
+  tensorzero_ui:
+    image: tensorzero/ui:2026.4.1
+    volumes:
+      - ./config:/app/config:ro
+    environment:
+      TENSORZERO_CLICKHOUSE_URL: http://${ANALYTICS_DB_USER}:${ANALYTICS_DB_PASSWORD}@analytics_db:8123/tensorzero
+      TENSORZERO_GATEWAY_URL: http://tensorzero_gw:3000
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      AWS_ACCESS_KEY_ID: ${APP_AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${APP_AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${APP_AWS_REGION:-us-east-1}
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector:4317/v1/traces"
+    networks:
+      - main
+    depends_on:
+      tensorzero_gw:
+        condition: service_healthy

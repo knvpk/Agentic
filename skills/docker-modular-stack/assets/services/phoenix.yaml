@@ -1,0 +1,14 @@
+
+services:
+  phoenix:
+    image: arizephoenix/phoenix:14.17.0
+    restart: unless-stopped
+    networks:
+      - main
+    labels:
+      - "layer=observability"
+    depends_on:
+      - db
+    environment:
+      - PHOENIX_SQL_DATABASE_URL=postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@db:5432/phoenix
+

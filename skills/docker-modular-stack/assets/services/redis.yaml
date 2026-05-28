@@ -1,0 +1,22 @@
+
+services:
+  cache1:
+    image: redis:8.8-m03-alpine
+    restart: unless-stopped
+    command: >
+      --requirepass ${CACHE_AUTH:-myredissecret}
+    networks:
+      - main
+    labels:
+      - "layer=data"
+    volumes:
+      - cache_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 10
+
+
+volumes:
+  cache_data:

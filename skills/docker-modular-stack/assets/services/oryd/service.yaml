@@ -1,0 +1,35 @@
+
+services:
+  oauth2: &oauth2
+    image: oryd/hydra:v2.3.0
+    restart: unless-stopped
+    environment:
+      - DSN=postgres://${DB_USER}:${DB_PASSWORD}@db:5432/hydra?sslmode=disable&max_conns=20&max_idle_conns=4
+      - LOG_LEVEL=trace
+      - SECRETS_SYSTEM_0=${OAUTH2_SECRET}
+      - OIDC_SUBJECT_IDENTIFIERS_PAIRWISE_SALT=${OAUTH2_SALT}
+      - ORY_SDK_URL=http://localhost:4445/
+    command: serve -c /etc/config/hydra/hydra.yml all --dev
+    volumes:
+      - type: bind
+        source: ./config
+        target: /etc/config/hydra
+      - type: bind
+        source: ./resources
+        target: /tmp/resources
+    networks:
+      - main
+
+  oauth2-migrate:
+    <<: *oauth2
+    command: migrate -c /etc/config/hydra/hydra.yml sql up -e --yes
+    restart: on-failure
+
+  oauth2-consent:
+    environment:
+      - HYDRA_ADMIN_URL=http://oauth2:4445
+    image: oryd/hydra-login-consent-node:v2.3.0
+    restart: unless-stopped
+    networks:
+      - main
+    

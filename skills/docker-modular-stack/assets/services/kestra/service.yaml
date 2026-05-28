@@ -1,0 +1,19 @@
+services:
+  kestra:
+    image: kestra/kestra:v0.22.18
+    user: "root"
+    command: server standalone --worker-thread=128 --config /etc/config/application.yaml
+    volumes:
+      - kestra_data:/app/storage
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp/kestra-wd:/tmp/kestra-wd
+      - ./config/application.yaml:/etc/config/application.yaml
+      - ./workflows:/app/workflows
+    environment:
+      DB_USER: $DB_USER
+      DB_PASSWORD: $DB_PASSWORD
+    networks:
+      - main 
+
+volumes:
+  kestra_data:

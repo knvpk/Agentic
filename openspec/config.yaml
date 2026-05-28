@@ -2,3 +2,9 @@ schema: spec-driven
 
 context: |
   Checkout README.md
+
+  ## Skills
+  - Keep skills in folder `skills/` so that `npx skills` can find them.
+  - Always follow specification mentioned in `https://agentskills.io/specification` when creating new/updating skills.
+
+

@@ -1,0 +1,11 @@
+services:
+  mission_control:
+    image: ghcr.io/builderz-labs/mission-control:latest
+    volumes:
+      - mission_control_data:/app/.data
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_GATEWAY_OPTIONAL: "true"
+
+volumes:
+  mission_control_data:

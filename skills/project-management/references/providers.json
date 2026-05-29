@@ -181,12 +181,16 @@
         "default_url": "https://gitlab.com/api/v4/mcp",
         "self_hosted_url_pattern": "{instance_url}/api/v4/mcp",
         "self_hosted_note": "Replace {instance_url} with your GitLab instance URL.",
-        "auth_methods": ["oauth"],
+        "auth_methods": ["oauth", "pat"],
         "default_auth": "oauth",
         "install_commands": {
-          "oauth": "claude mcp add gitlab --scope project --transport http {url}"
+          "oauth": "claude mcp add gitlab --scope project --transport http {url}",
+          "pat": "claude mcp add gitlab --scope project --transport http {url} --header \"Authorization=Bearer {token}\""
         },
         "oauth_note": "OAuth 2.0 Dynamic Client Registration — completes via browser on first use. Run /mcp in Claude to trigger.",
+        "pat_prompt": "Enter your GitLab Personal Access Token (api scope required):",
+        "pat_url": "https://gitlab.com/-/user_settings/personal_access_tokens",
+        "pat_env": "GITLAB_TOKEN",
         "required_env": [],
         "optional_env": [],
         "restart_required": false,

@@ -6,11 +6,18 @@
 **Official endpoint**: `https://gitlab.com/api/v4/mcp`
 **Self-hosted pattern**: `{instance_url}/api/v4/mcp`
 
-**Setup — OAuth (only option for cloud):**
+**Setup — OAuth (browser flow, recommended):**
 ```bash
 claude mcp add gitlab --scope project --transport http https://gitlab.com/api/v4/mcp
 # Then type /mcp in Claude to complete OAuth 2.0 browser flow
 ```
+
+**Setup — PAT (headless / CI-friendly):**
+```bash
+# Token requires api scope — create at: https://gitlab.com/-/user_settings/personal_access_tokens
+claude mcp add gitlab --scope project --transport http https://gitlab.com/api/v4/mcp --header "Authorization=Bearer glpat-xxxx"
+```
+If `GITLAB_TOKEN` is already set in your environment, `/project-management init` will detect it and use PAT auth automatically.
 
 **Self-hosted:**
 ```bash

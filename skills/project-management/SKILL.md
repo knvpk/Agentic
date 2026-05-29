@@ -308,6 +308,10 @@ Use the default or a self-hosted instance?
 
 **Step B — Resolve auth method**
 
+**GitLab env pre-check**: Before presenting any choice, if the provider is GitLab, read `mcp_setup.pat_env` (= `"GITLAB_TOKEN"`) and check whether that variable is set in the environment:
+- **Found** → emit `Found GITLAB_TOKEN in environment — using PAT auth ✓` and skip to the PAT install command directly (no question asked).
+- **Not found** → continue to the question below.
+
 Read `mcp_setup.auth_methods`. If only one → use it. If multiple → ask:
 
 ```
@@ -319,7 +323,7 @@ How should the MCP authenticate?
 | Provider | OAuth command | Token command |
 |----------|--------------|---------------|
 | GitHub | `claude mcp add github -t http --url {url}` | append `--header "Authorization=Bearer {token}"` |
-| GitLab | `claude mcp add gitlab --transport http {url}` | OAuth only |
+| GitLab | `claude mcp add gitlab --scope project --transport http {url}` | append `--header "Authorization=Bearer {token}"` |
 | Jira | `claude mcp add jira --transport http {url}` | append `--header "Authorization=Basic {base64}"` |
 | Plane | `claude mcp add plane --transport http {url} --header "x-api-key={key}"` | API key in header |
 

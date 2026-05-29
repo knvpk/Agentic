@@ -373,6 +373,67 @@ Since HTTP transport takes effect immediately (no local process restart needed),
 
 If **user cancels** → print `references/{provider}.md` setup section and stop.
 
+### Step 3b — GitLab-specific setup (GitLab only)
+
+Skip this step entirely if `provider.name != "gitlab"`.
+
+**Group detection**
+
+Run `git remote get-url origin` and parse the group path:
+- HTTPS: `https://gitlab.example.com/{group}/{repo}.git` → group = first path segment after host
+- SSH: `git@gitlab.example.com:{group}/{repo}.git` → group = segment before the last `/`
+
+If group detected, confirm: `"Detected GitLab group: {group}. Is this correct? [y/n]"` — on `n`, ask for manual entry.
+If not detected, ask: `"Enter your GitLab group path (e.g. mycompany):"`
+
+Store as `gitlab_group` in `.project/config.yaml`.
+
+**Edition detection**
+
+Call `ToolSearch("mcp__gitlab__list_iterations")`:
+- **Tool found** → call `mcp__gitlab__list_iterations` (scoped to the detected group):
+  - 200 → `gitlab_edition: ee-premium`, `sprint_proxy: iteration`
+  - 403 or 404 → `gitlab_edition: ce`, `sprint_proxy: label`, `sprint_label_scope: sprint`
+- **Tool not found** → ask: `"Could not detect GitLab edition. Is your instance EE Premium or Ultimate? [y/n]"`
+  - `y` → `gitlab_edition: ee-premium`, `sprint_proxy: iteration`
+  - `n` → `gitlab_edition: ce`, `sprint_proxy: label`, `sprint_label_scope: sprint`
+
+Store results in `.project/config.yaml`.
+
+**Sprint naming convention (CE only)**
+
+If `gitlab_edition == "ce"`:
+
+First, if this is a re-probe (`init --probe`), check for existing sprint labels:
+- Call `mcp__gitlab__list_labels` with `search=sprint::`
+- If labels found AND the stored `sprint_convention` differs from what the user is about to select → after selection, output:
+  ```
+  ⚠ Sprint labels already exist using {old_convention} convention — changing requires
+    manually relabelling existing sprints. Confirm change? [y/n]
+  ```
+  On `n`: keep existing `sprint_convention`, skip writing.
+
+Ask:
+```
+Which sprint naming convention?
+  1. Sequential          sprint::1, sprint::2  (simplest)
+  2. Year-Week (ISO)     sprint::2025-W23      (recommended)
+  3. Year-Month-Week     sprint::2025-06-W3
+  4. Quarterly           sprint::Q2-2025-S1
+```
+Store choice as `sprint_convention: sequential | year-week | year-month-week | quarterly`.
+Output: `⚠ Convention cannot be changed after the first sprint is created without relabelling existing sprints.`
+
+**pm-meta project setup (CE only)**
+
+If `gitlab_edition == "ce"`:
+1. Compute target path: `{gitlab_group}/pm-meta`
+2. Call `mcp__gitlab__get_project` with the target path:
+   - 200 → project exists; store `pm_meta_project: {gitlab_group}/pm-meta`
+   - 404 → call `mcp__gitlab__create_project` with `name: pm-meta`, `namespace: gitlab_group`:
+     - Success → store `pm_meta_project: {gitlab_group}/pm-meta`
+     - 403 → store `pm_meta_project: {current_project_path}`; output `⚠ Could not create pm-meta project — sprint metadata will be stored in the current project`
+
 ### Step 4 — API probe (Signal 2)
 
 For each feature, call a safe read endpoint. Map result to capability flag:
@@ -383,6 +444,8 @@ For each feature, call a safe read endpoint. Map result to capability flag:
 | sprints | `list_cycles` / `list_milestones` / `list_boards` | true | false | ask user |
 | relationships | `list_issue_relations` / `list_issue_links` | true | false | ask user |
 | sub_issues | `list_issues` | true | false | assume true |
+
+For **GitLab**: use `gitlab_edition` from Step 3b to select `plan_variants.ce` or `plan_variants.ee-premium` from `providers.json` instead of probing sprint capability separately. The edition detection in Step 3b IS the sprint probe for GitLab.
 
 When asking the user (ambiguous probe):
 > "Couldn't determine whether your {Provider} workspace supports {feature}. Is it available on your plan? [y/n]"
@@ -408,6 +471,18 @@ stack: rest            # omit for generic; values: react-native, flutter, nextjs
 # context_repos:
 #   - ../mobile-app
 #   - ../auth-service
+```
+
+**GitLab CE additional fields** — written by Step 3b, present only when `provider.name == "gitlab"`:
+
+```yaml
+gitlab_group: mycompany              # GitLab group path, parsed from git remote
+gitlab_edition: ce                   # ce | ee-premium (set by edition probe)
+sprint_proxy: label                  # label (CE) | iteration (EE) | milestone (GitHub)
+sprint_label_scope: sprint           # scoped label prefix — labels are sprint::{value}
+sprint_convention: year-week         # sequential | year-week | year-month-week | quarterly
+sprint_length_days: 14               # default sprint duration in days (used to derive end date)
+pm_meta_project: mycompany/pm-meta   # project holding sprint metadata issues
 ```
 
 ### Step 6 — Jira extra: board selection
@@ -448,6 +523,11 @@ For each capability that is false, print one line:
 ```
 ⚠  Epics not available on this plan — using label epic:{slug} fallback
 ⚠  Sprints not available — using milestone proxy
+```
+
+**GitLab CE exception**: do NOT print the sprint proxy warning above. Instead print:
+```
+ℹ  GitLab CE — sprints use scoped labels (sprint::*). Convention: {sprint_convention}. Metadata: {pm_meta_project}.
 ```
 
 ### Step 9 — Offer docs scaffold
@@ -734,7 +814,9 @@ After all create calls complete:
 ```
 Add all N created tickets to Sprint {name}? [y/n]
 ```
-On `y`: call sprint assignment MCP tool for each successfully created ticket.
+On `y`: for each successfully created ticket —
+- **GitLab CE (`sprint_proxy == "label"`)**: call `mcp__gitlab__update_issue` to append `active_sprint.label_name` to the issue's labels
+- **All other providers**: call the sprint assignment MCP tool with the sprint ID
 
 **Epic label offer** (only if manifest had ≥2 distinct epic groups):
 ```
@@ -893,8 +975,13 @@ Accept canonical state filter. Translate to provider query syntax via `state_map
 
 ### Sub-mode: sprint create
 
-Map to provider mechanism via `providers.json`:
-- GitHub / GitLab → `create_milestone` (name, due date)
+Read `sprint_proxy` from `.project/config.yaml`.
+
+**If `sprint_proxy == "label"` (GitLab CE)** → follow the CE Label Sprint Flow below.
+
+**Otherwise**, map to provider mechanism via `providers.json`:
+- GitHub → `create_milestone` (name, due date)
+- GitLab EE → native iteration API
 - Jira → `create_sprint` (name, startDate, endDate, originBoardId from config)
 - Plane → `create_cycle` (name, start_date, end_date)
 
@@ -905,9 +992,76 @@ active_sprint:
   name: "Sprint 4"
 ```
 
+#### CE Label Sprint Flow (GitLab CE — `sprint_proxy: label` only)
+
+**Step 1 — Derive label name from convention**
+
+Read `sprint_convention` from config:
+
+| Convention | Input needed | Label name derived |
+|---|---|---|
+| `sequential` | None — auto-increment | Call `mcp__gitlab__list_labels` with `search=sprint::`, find max N, use `sprint::{N+1}` |
+| `year-week` | Start date (or today) | `sprint::{YYYY}-W{WW}` (ISO week number, zero-padded) |
+| `year-month-week` | Start date (or today) | `sprint::{YYYY}-{MM}-W{w}` (week of month, 1-indexed) |
+| `quarterly` | Quarter, year, sprint-in-quarter | `sprint::Q{q}-{YYYY}-S{n}` |
+
+**Step 2 — Collect sprint metadata**
+
+Prompt for:
+- Start date (default: next Monday from today's date)
+- End date (default: start + `sprint_length_days` from config, default 14)
+- Goal (optional free text)
+- Capacity in story points (optional)
+
+**Step 3 — Create sprint metadata issue**
+
+Call `mcp__gitlab__create_issue`:
+- `project`: value of `pm_meta_project` from config
+- `title`: `[Sprint] {label_value} | {start} – {end}`
+- `description`:
+```
+<!-- pm:start -->
+start: {start}
+end: {end}
+goal: {goal or ""}
+capacity: {capacity or ""}
+status: active
+convention: {sprint_convention}
+<!-- pm:end -->
+
+## Goal
+{goal or "(none)"}
+```
+Store the returned issue URL as `meta_issue_url`.
+
+**Step 4 — Create group-level sprint label**
+
+Call `mcp__gitlab__create_label` scoped to the group (`gitlab_group` from config):
+- `name`: `sprint::{label_value}`
+- `color`: cycle through `#3CB371`, `#4169E1`, `#9370DB`, `#FF8C00` based on sprint index mod 4
+- `description`: `{meta_issue_url}`
+
+**Step 5 — Write active sprint to config**
+
+Store in `.project/config.yaml`:
+```yaml
+active_sprint:
+  label_name: "sprint::2025-W23"
+  meta_issue_url: "https://gitlab.example.com/group/pm-meta/-/issues/42"
+  start: "2025-06-02"
+  end: "2025-06-13"
+```
+Output: `✓ Sprint {label_value} created ({start} – {end})`
+
 ### Sub-mode: sprint add / remove
 
-Resolve sprint ID from config. Call `add_issue_to_sprint` / remove equivalent.
+Read `sprint_proxy` from config.
+
+**GitLab CE (`sprint_proxy == "label"`)**: apply or remove the sprint scoped label on the issue:
+- **add**: call `mcp__gitlab__update_issue` with the current `active_sprint.label_name` appended to the issue's existing labels
+- **remove**: call `mcp__gitlab__update_issue` with `active_sprint.label_name` removed from the issue's label list
+
+**All other providers**: resolve sprint ID from `active_sprint.id` in config. Call `add_issue_to_sprint` / remove equivalent.
 
 ### Sub-mode: labels
 
@@ -922,6 +1076,14 @@ Resolve sprint ID from config. Call `add_issue_to_sprint` / remove equivalent.
 Detect operation: **create | assign | list | close**
 
 **create** — collect: name (e.g. "v1.0"), description, due date.
+
+**GitLab CE guard**: if `sprint_proxy == "label"` and the name matches any sprint convention pattern — `Sprint \d+`, `\d{4}-W\d{2}`, `\d{4}-\d{2}-W\d`, `Q\d-\d{4}-S\d+` — reject and output:
+```
+For GitLab CE, sprints use scoped labels (sprint::*). Use sprint create instead.
+Milestones are for release targets only (e.g. v1.0, Beta, Q3 Launch).
+```
+Do not call any milestone API on rejection.
+
 Read `capabilities.milestones` from config:
 - `true` → call `milestone_contracts.create` from `providers.json`
 - `false` (Plane) → activate label fallback: create label `milestone:{slug}`, notify user
@@ -945,11 +1107,11 @@ For Plane fallback: search issues by `milestone:*` label prefix.
 | Jira     | Fix Version | ✓ |
 | Plane    | Label `milestone:{slug}` | ✗ (fallback) |
 
-**Naming convention for GitHub/GitLab** (both use milestones for sprints too):
-- Sprints: `Sprint N` or `YYYY-WW` (week-based)
-- Milestones: `vX.Y.Z` or plain release name (`Beta`, `Q3 Launch`)
+**Naming convention for milestones**: `vX.Y.Z` or plain release name (`Beta`, `Q3 Launch`). For GitHub, milestones also serve as sprint proxies (`Sprint N`). For GitLab CE, sprints use scoped labels — not milestones.
 
 ### Sub-mode: status
+
+**Ticket fetch**: use `active_sprint.label_name` as the label filter for GitLab CE repos (`sprint_proxy: label`); use milestone/sprint ID for all other providers.
 
 **Single-repo** (no `context_repos` configured): fetch all active sprint tickets using the anchor's provider. Group by canonical state. Display unchanged v1 format:
 
@@ -997,7 +1159,12 @@ Read `.project/config.yaml`. If no `active_sprint` is set on the anchor repo, te
 
 ### Step 2 — Fetch open in-sprint tickets
 
-For each repo in the set (anchor + valid siblings), call `list_tickets` filtered to that repo's `active_sprint` + state != done, using that repo's own `mcp_prefix`. Collect: id, title, description, canonical_state, priority, estimate, blocked_by relationships. Tag each ticket with `source_repo` (relative path, `"."` for anchor).
+For each repo in the set (anchor + valid siblings), call `list_tickets` filtered to that repo's `active_sprint` + state != done, using that repo's own `mcp_prefix`.
+
+**GitLab CE filter**: if `sprint_proxy == "label"`, filter by `labels: {active_sprint.label_name}` (e.g. `labels: sprint::2025-W23`) instead of `milestone: {active_sprint.id}`.
+**All other providers**: filter by milestone ID or sprint ID as before.
+
+Collect: id, title, description, canonical_state, priority, estimate, blocked_by relationships. Tag each ticket with `source_repo` (relative path, `"."` for anchor).
 
 Merge all results into a single candidate pool.
 

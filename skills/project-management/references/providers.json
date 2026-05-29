@@ -122,13 +122,13 @@
         "add_label":          "update_issue",
         "create_milestone":   "create_milestone",
         "list_milestones":    "list_milestones",
-        "sprint":             "create_milestone",
+        "sprint":             "create_label",
         "create_epic":        "create_epic",
         "create_relation":    "create_issue_link",
         "get_relation":       "list_issue_links"
       },
       "milestone_contracts": {
-        "_note": "GitLab milestones serve both sprints and release milestones. Distinguished by naming: 'Sprint N' vs 'v1.0'.",
+        "_note": "GitLab milestones are for release targets only (v1.0, Beta, Q3 Launch). CE sprints use scoped labels (sprint::*) — not milestones. EE Premium uses native iterations.",
         "create":  "create_milestone",
         "list":    "list_milestones",
         "update":  "update_milestone",
@@ -147,15 +147,16 @@
         "ce": {
           "epics": false,
           "sprints": true,
-          "sprint_proxy": "milestone",
+          "sprint_proxy": "label",
+          "sprint_label_scope": "sprint",
           "milestones": true,
           "relationships": false,
           "sub_issues": true
         },
-        "ee": {
+        "ee-premium": {
           "epics": true,
           "sprints": true,
-          "sprint_proxy": "milestone",
+          "sprint_proxy": "iteration",
           "milestones": true,
           "relationships": true,
           "sub_issues": true
@@ -167,6 +168,12 @@
           "label_prefix": "epic:",
           "description_note": "Part of epic: {slug}"
         },
+        "sprint": {
+          "strategy": "label",
+          "label_scope": "sprint",
+          "meta_issue_in_description": true,
+          "description": "GitLab CE — scoped labels sprint::* proxy iterations; label description holds pm-meta issue URL"
+        },
         "relationships.blocks": {
           "strategy": "comment",
           "comment_format": "Blocks: #{issue_id}"
@@ -174,6 +181,19 @@
         "relationships.relates_to": {
           "strategy": "label",
           "label_format": "relates:#{issue_id}"
+        }
+      },
+      "gitlab_extras": {
+        "edition_probe": {
+          "tool": "list_iterations",
+          "ce_result": [404, 403],
+          "ee_premium_result": [200]
+        },
+        "sprint_naming_conventions": {
+          "sequential":      { "pattern": "{n}",               "example": "sprint::1" },
+          "year-week":       { "pattern": "{YYYY}-W{WW}",      "example": "sprint::2025-W23" },
+          "year-month-week": { "pattern": "{YYYY}-{MM}-W{w}",  "example": "sprint::2025-06-W3" },
+          "quarterly":       { "pattern": "Q{q}-{YYYY}-S{n}",  "example": "sprint::Q2-2025-S1" }
         }
       },
       "mcp_setup": {

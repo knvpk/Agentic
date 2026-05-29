@@ -7,3 +7,7 @@
 - [ ] Perspective of `project-management` skill is for "single-man-army"
 - [ ] In `project-management` skill `next` command should support "no of tickets" to do so that claude can utilize `claude agents` and do things paralelly.
 - [ ] Does `.project/config.yaml` support ENV params to fill `GITLAB_URL` in case of self-hosted gitlab env.
+- [x] Gitlab doesnt support native sprints, that also needs to be done by labels only. The IssueBoard is confusing item its just a board filtered by labels.
+- [ ] Project managment skill should follow agile practises.
+- [ ] Giltab mcp doesnt have update_issue tool to change the status.
+- [ ] A dedicated .env.tempalte skill. as part of engineering group. which should be gitlable.

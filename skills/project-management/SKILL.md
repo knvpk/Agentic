@@ -227,6 +227,18 @@ When `create` is issued:
 
 If `.project/config.yaml` exists and `--probe` flag is NOT set, read it and skip to Step 5.
 
+### Step 1b — Validate existing config before re-probe (`--probe` only)
+
+When `--probe` is set and the file exists, validate it against `references/config.schema.json` before proceeding. Report each violation as a drift warning — these are informational; the probe continues regardless to correct the config.
+
+```
+⚠ sprint_convention missing — will re-probe
+⚠ old_field is not a recognised config field — will be removed on re-write
+⚠ gitlab_edition: must be ce or ee-premium, got: community — will re-probe
+```
+
+Format: `⚠ <field> <reason> — will re-probe` for missing/invalid fields; `⚠ <key> is not a recognised config field — will be removed on re-write` for unknown keys. After printing all drift lines, continue to Step 2.
+
 ### Step 2 — Provider selection
 
 **a. Try to detect from git remote:**
@@ -450,40 +462,33 @@ For **GitLab**: use `gitlab_edition` from Step 3b to select `plan_variants.ce` o
 When asking the user (ambiguous probe):
 > "Couldn't determine whether your {Provider} workspace supports {feature}. Is it available on your plan? [y/n]"
 
+### Step 4.5 — Validate assembled config
+
+Assemble the full config object in memory from all values collected in Steps 2–4. Validate it against `references/config.schema.json`.
+
+**If validation fails:**
+```
+✗ Config validation failed — not writing .project/config.yaml
+
+  • provider.name: must be one of github, gitlab, jira, plane
+  • gitlab_edition: required when provider.name is gitlab
+  {one line per violation}
+
+Fix the issues above and re-run init.
+```
+Do NOT write the file. Stop here.
+
+**If validation passes:** continue to Step 5.
+
 ### Step 5 — Write `.project/config.yaml`
 
-```yaml
-provider:
-  name: plane
-  mcp_prefix: mcp__plane__
-  capabilities:
-    epics: false
-    sprints: true
-    relationships: true
-    sub_issues: true
-  probed_at: 2026-05-28T10:00:00Z   # ISO-8601
-
-project_type: api      # mobile | web | api | microservices | generic
-stack: rest            # omit for generic; values: react-native, flutter, nextjs, nuxt, rest, graphql, grpc, separate-repos, monorepo
-
-# Optional: sibling repo paths — each must have its own .project/config.yaml
-# Used for cross-repo context fallback AND unified multi-repo sprint views
-# context_repos:
-#   - ../mobile-app
-#   - ../auth-service
-```
-
-**GitLab CE additional fields** — written by Step 3b, present only when `provider.name == "gitlab"`:
+Write `.project/config.yaml` conforming to `references/config.schema.json`. Begin the file with the schema comment so editors can provide autocomplete and inline validation:
 
 ```yaml
-gitlab_group: mycompany              # GitLab group path, parsed from git remote
-gitlab_edition: ce                   # ce | ee-premium (set by edition probe)
-sprint_proxy: label                  # label (CE) | iteration (EE) | milestone (GitHub)
-sprint_label_scope: sprint           # scoped label prefix — labels are sprint::{value}
-sprint_convention: year-week         # sequential | year-week | year-month-week | quarterly
-sprint_length_days: 14               # default sprint duration in days (used to derive end date)
-pm_meta_project: mycompany/pm-meta   # project holding sprint metadata issues
+# yaml-language-server: $schema=../skills/project-management/references/config.schema.json
 ```
+
+All valid fields and their constraints are defined in `references/config.schema.json`. Refer to it as the authoritative field list.
 
 ### Step 6 — Jira extra: board selection
 
@@ -1368,6 +1373,17 @@ Reverse-map the raw provider state to canonical state via `state_mapping`:
 > **Skip this step entirely if `--no-branch` was passed.** Set `BRANCH_SKIPPED=true` and go to Step 6.
 
 #### Step 5a — Detect branching strategy
+
+**1. Read `branching` from `.project/config.yaml` first.**
+
+If `branching` is present, use it directly and skip git topology detection:
+
+| `branching.strategy` | Base branch for feature work | Tell the user |
+|---|---|---|
+| `single` | `branching.main` (default: `main`) | "Config: single-branch — branching from `{main}`." |
+| `multi` | `branching.develop` (default: `develop`) | "Config: multi-branch — branching from `{develop}`. Merge path: {develop} → {staging if set} → {main}." |
+
+**2. If `branching` is absent**, fall back to git topology auto-detection:
 
 Run `git branch -a --format=%(refname:short)` and infer from topology:
 

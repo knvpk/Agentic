@@ -1,0 +1,244 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "skills/project-management/references/config.schema.json",
+  "title": "project-management config",
+  "description": "Authoritative schema for .project/config.yaml written by the project-management skill init mode. All fields must be defined here before being referenced in SKILL.md.",
+  "type": "object",
+  "required": ["provider", "project_type"],
+  "unevaluatedProperties": false,
+
+  "$defs": {
+    "provider_name_enum": {
+      "type": "string",
+      "enum": ["github", "gitlab", "jira", "plane"],
+      "description": "Supported issue tracker providers"
+    },
+    "project_type_enum": {
+      "type": "string",
+      "enum": ["mobile", "web", "api", "microservices", "generic"]
+    },
+    "stack_enum": {
+      "type": "string",
+      "enum": [
+        "react-native", "flutter", "native",
+        "nextjs", "nuxt", "remix", "vite-spa",
+        "rest", "graphql", "grpc", "mixed",
+        "separate-repos", "monorepo",
+        "other"
+      ]
+    },
+    "sprint_convention_enum": {
+      "type": "string",
+      "enum": ["sequential", "year-week", "year-month-week", "quarterly"]
+    },
+    "capabilities": {
+      "type": "object",
+      "required": ["epics", "sprints", "relationships", "sub_issues"],
+      "additionalProperties": false,
+      "properties": {
+        "epics":         { "type": "boolean" },
+        "sprints":       { "type": "boolean" },
+        "relationships": { "type": "boolean" },
+        "sub_issues":    { "type": "boolean" }
+      }
+    },
+    "provider_block": {
+      "type": "object",
+      "required": ["name", "mcp_prefix"],
+      "additionalProperties": false,
+      "properties": {
+        "name":       { "$ref": "#/$defs/provider_name_enum" },
+        "mcp_prefix": {
+          "type": "string",
+          "pattern": "^mcp__[a-z]+__$",
+          "description": "e.g. mcp__github__"
+        },
+        "mcp_url":      { "type": "string", "format": "uri" },
+        "capabilities": { "$ref": "#/$defs/capabilities" },
+        "probed_at":    { "type": "string", "format": "date-time" }
+      }
+    },
+    "active_sprint_standard": {
+      "type": "object",
+      "required": ["id", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "id":   { "type": "string", "description": "Sprint or milestone ID from the provider" },
+        "name": { "type": "string", "description": "Human-readable sprint name, e.g. Sprint 4" }
+      }
+    },
+    "active_sprint_ce": {
+      "type": "object",
+      "required": ["label_name", "meta_issue_url", "start", "end"],
+      "additionalProperties": false,
+      "properties": {
+        "label_name": {
+          "type": "string",
+          "pattern": "^sprint::",
+          "description": "Scoped GitLab CE sprint label, e.g. sprint::2025-W23"
+        },
+        "meta_issue_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL of the pm-meta sprint metadata issue"
+        },
+        "start": { "type": "string", "format": "date" },
+        "end":   { "type": "string", "format": "date" }
+      }
+    },
+    "branching_single": {
+      "type": "object",
+      "required": ["strategy", "main"],
+      "unevaluatedProperties": false,
+      "properties": {
+        "strategy": { "const": "single" },
+        "main": {
+          "type": "string",
+          "default": "main",
+          "description": "Production / main branch name"
+        }
+      }
+    },
+    "branching_multi": {
+      "type": "object",
+      "required": ["strategy", "main", "develop"],
+      "unevaluatedProperties": false,
+      "properties": {
+        "strategy": { "const": "multi" },
+        "main": {
+          "type": "string",
+          "default": "main",
+          "description": "Production branch name"
+        },
+        "develop": {
+          "type": "string",
+          "default": "develop",
+          "description": "Default feature branch base"
+        },
+        "staging": {
+          "type": "string",
+          "default": "staging",
+          "description": "Optional intermediate branch between develop and main"
+        }
+      }
+    }
+  },
+
+  "properties": {
+    "provider":      { "$ref": "#/$defs/provider_block" },
+    "project_type":  { "$ref": "#/$defs/project_type_enum" },
+    "stack":         { "$ref": "#/$defs/stack_enum" },
+    "active_sprint": {
+      "description": "Currently active sprint reference. Shape depends on sprint_proxy.",
+      "oneOf": [
+        { "$ref": "#/$defs/active_sprint_ce" },
+        { "$ref": "#/$defs/active_sprint_standard" }
+      ]
+    },
+    "context_repos": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Sibling repo paths for cross-repo context fallback and unified sprint views. Each must have its own .project/config.yaml."
+    },
+    "branching": {
+      "description": "Branching strategy. When absent, start mode falls back to git topology auto-detection.",
+      "oneOf": [
+        { "$ref": "#/$defs/branching_single" },
+        { "$ref": "#/$defs/branching_multi" }
+      ]
+    },
+
+    "gitlab_group": {
+      "type": "string",
+      "description": "GitLab group path parsed from git remote, e.g. mycompany. Required when provider.name == gitlab."
+    },
+    "gitlab_edition": {
+      "type": "string",
+      "enum": ["ce", "ee-premium"],
+      "description": "GitLab edition. Determines sprint mechanism (label vs iteration). Required when provider.name == gitlab."
+    },
+    "sprint_proxy": {
+      "type": "string",
+      "enum": ["label", "iteration", "milestone"],
+      "description": "label (GitLab CE) | iteration (GitLab EE Premium) | milestone (GitHub). Required when provider.name == gitlab."
+    },
+    "sprint_label_scope": {
+      "type": "string",
+      "description": "Scoped label prefix for CE sprints. Labels are {scope}::{value}, e.g. sprint::2025-W23. Required when provider.name == gitlab."
+    },
+    "sprint_convention": {
+      "$ref": "#/$defs/sprint_convention_enum",
+      "description": "Sprint naming convention for GitLab CE. Required when provider.name == gitlab."
+    },
+    "sprint_length_days": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Default sprint duration in days; used to derive end date from start. Required when provider.name == gitlab."
+    },
+    "pm_meta_project": {
+      "type": "string",
+      "description": "GitLab project path holding sprint metadata issues, e.g. mycompany/pm-meta. Required when provider.name == gitlab."
+    }
+  },
+
+  "allOf": [
+    {
+      "if": {
+        "required": ["provider"],
+        "properties": {
+          "provider": {
+            "required": ["name"],
+            "properties": { "name": { "const": "gitlab" } }
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "gitlab_group",
+          "gitlab_edition",
+          "sprint_proxy",
+          "sprint_label_scope",
+          "sprint_convention",
+          "sprint_length_days",
+          "pm_meta_project"
+        ]
+      }
+    },
+    {
+      "if": {
+        "required": ["project_type"],
+        "properties": {
+          "project_type": { "not": { "const": "generic" } }
+        }
+      },
+      "then": { "required": ["stack"] }
+    },
+    {
+      "if": {
+        "required": ["sprint_proxy"],
+        "properties": { "sprint_proxy": { "const": "label" } }
+      },
+      "then": {
+        "properties": {
+          "active_sprint": { "$ref": "#/$defs/active_sprint_ce" }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["branching"],
+        "properties": {
+          "branching": {
+            "required": ["strategy"],
+            "properties": { "strategy": { "const": "multi" } }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "branching": { "required": ["develop"] }
+        }
+      }
+    }
+  ]
+}

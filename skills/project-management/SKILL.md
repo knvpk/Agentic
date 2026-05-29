@@ -20,15 +20,49 @@ compatibility: >
 
 # project-management
 
+## Shared: Query Normalization
+
+Before routing to a mode, extract **intent** and **filters** from the user's input. Use the normalized output to determine mode, sub-mode, and pre-filled filters.
+
+### Intent verbs
+
+| Input contains | Intent | Default route |
+|---------------|--------|---------------|
+| show, list, find, search | list | ticket → list |
+| create, add, new | create | ticket → new |
+| update, move, change, set | update | ticket → update |
+| close, done, finish, mark, complete | lifecycle | ticket → update (state) |
+| *(ambiguous / no match)* | list | ticket → list |
+
+### Filter grammar
+
+| Pattern in input | Filter key | Example |
+|-----------------|-----------|---------|
+| `@{name}` | assignee | `@alice` → `assignee: "alice"` |
+| `#{id}` or `TICK-{n}` | ticket | `#42` → `ticket: "42"` |
+| `"about {term}"` | search_term | `"about auth"` → `search_term: "auth"` |
+| `"in sprint {n}"` | sprint | `"in sprint 4"` → `sprint: "Sprint 4"` |
+| canonical state name | state | `"blocked"` → `state: "blocked"` |
+| `"high priority"`, `"critical"`, `"low priority"` | priority | `"high priority"` → `priority: "high"` |
+| `"label:{slug}"` | label | `"label:backend"` → `label: "backend"` |
+
+Filters compose: `"show me @alice's blocked high-priority tickets in sprint 4"` → `{ assignee: "alice", state: "blocked", priority: "high", sprint: "Sprint 4" }`.
+
+---
+
 ## Mode Routing
 
-Read the user's intent and pick one mode:
+Run Query Normalization first, then route:
 
 | User says | Mode |
 |-----------|------|
 | "init", "set up project", "configure provider", "init --probe" | **init** |
 | "update the PRD", "add to architecture", "edit database doc", "scaffold docs", "update tools" | **docs** |
-| "create a ticket", "new issue", "update ticket", "link tickets", "list tickets", "close ticket", "ticket status" | **ticket** |
+| "create a ticket", "new issue", "add task" | **ticket → new** |
+| "update TICK-42", "move TICK-42 to in-review", "close TICK-5" | **ticket → update** |
+| "link TICK-42 to TICK-10", "blocks", "relates to" | **ticket → link** |
+| "list tickets", "show tickets", "find tickets about auth" | **ticket → list** |
+| "show me @alice's tickets", "what's blocked", "search for login tickets" | **ticket → list** |
 | "new sprint", "start sprint", "add to sprint", "remove from sprint", "create label", "sprint status" | **sprint** |
 | "create milestone", "new milestone", "release milestone", "assign milestone", "list milestones", "close milestone" | **sprint → milestone** |
 | "what should I work on", "next ticket", "what's next", "suggest a task" | **next** |
@@ -69,13 +103,15 @@ Always check `capabilities` in `.project/config.yaml` before using native API. I
 When generating ticket context, follow this chain — stop at first hit, only include **relevant** pieces:
 
 ```
-1. docs/prd.md        → find sections matching the ticket topic by keyword
-2. docs/architecture.md → find components matching the ticket topic
-3. docs/database.md   → find entities/tables matching the ticket topic
-4. docs/tools.md      → find tools relevant to the ticket topic
-5. local repo files   → search src/, lib/, config files by filename + content proximity
-6. context_repos      → if set in .project/config.yaml, search those repo paths
-7. warn               → "No relevant context found — Context section may be incomplete"
+1. docs/prd.md            → find sections matching the ticket topic by keyword
+                             (skip if project_type: microservices — no prd.md in that type)
+2. docs/architecture.md   → find components matching the ticket topic
+3. docs/database.md       → find entities/tables matching the ticket topic
+   docs/local-storage.md  → use instead of database.md when project_type: mobile
+4. docs/tools.md          → find tools relevant to the ticket topic
+5. local repo files       → search src/, lib/, config files by filename + content proximity
+6. context_repos          → if set in .project/config.yaml, search those repo paths
+7. warn                   → "No relevant context found — Context section may be incomplete"
 ```
 
 Never dump an entire docs file. Only include sections/paragraphs where the topic appears.
@@ -111,6 +147,30 @@ Which provider will this project use?
 ```
 
 Store: `provider.name`, `provider.mcp_prefix`.
+
+### Step 2b — Project type and stack
+
+Ask:
+```
+What kind of project is this?
+  1. Mobile app  (iOS / Android / React Native / Flutter)
+  2. Web app     (SPA / SSR / PWA)
+  3. API service (REST / GraphQL / gRPC)
+  4. Microservices  (multiple services — this is the coordination repo)
+  5. Generic / full-stack
+```
+
+Store as `project_type`: `mobile` | `web` | `api` | `microservices` | `generic`.
+
+**Conditional follow-up** — ask only the matching clarification, skip for generic:
+
+| project_type | Question | Options | Stored as `stack` |
+|---|---|---|---|
+| mobile | Cross-platform or native? | react-native, flutter, native, other | e.g. `react-native` |
+| web | Framework? | nextjs, nuxt, remix, vite-spa, other | e.g. `nextjs` |
+| api | Protocol? | rest, graphql, grpc, mixed | e.g. `rest` |
+| microservices | Repo structure? | separate-repos, monorepo | e.g. `separate-repos` |
+| generic | *(skip)* | — | *(omit from config)* |
 
 ### Step 3 — ToolSearch probe (Signal 1) + MCP setup wizard
 
@@ -233,10 +293,14 @@ provider:
     sub_issues: true
   probed_at: 2026-05-28T10:00:00Z   # ISO-8601
 
-# Optional: list sibling repo paths for cross-repo context fallback
+project_type: api      # mobile | web | api | microservices | generic
+stack: rest            # omit for generic; values: react-native, flutter, nextjs, nuxt, rest, graphql, grpc, separate-repos, monorepo
+
+# Optional: sibling repo paths — each must have its own .project/config.yaml
+# Used for cross-repo context fallback AND unified multi-repo sprint views
 # context_repos:
-#   - ../backend
-#   - ../shared-lib
+#   - ../mobile-app
+#   - ../auth-service
 ```
 
 ### Step 6 — Jira extra: board selection
@@ -259,6 +323,18 @@ they do not already exist. Call `create_label` for each missing label:
 Skip this step only for **Jira** — Jira labels are free-text strings attached directly to issues; no `create_label` call is needed or supported. For **Plane**, check `state_mapping` entries: create labels only for entries that contain a `label` field (`in-review` and `blocked`); skip entries that use `state_name` only.
 Output: `✓ State labels created` or `✓ State labels already present`.
 
+**Type-specific supplementary labels** — after canonical state labels, also create the following if `project_type` is set and provider supports `create_label` (skip for Jira free-text):
+
+| project_type | Additional labels | Colours |
+|---|---|---|
+| mobile | `platform:ios`, `platform:android`, `platform:shared`, `crash`, `a11y`, `store-review-blocker` | `#0075ca`, `#28a745`, `#6f42c1`, `#d93f0b`, `#0052cc`, `#b60205` |
+| web | `seo`, `performance`, `a11y`, `responsive`, `pwa`, `breaking` | `#0075ca`, `#e4e669`, `#0052cc`, `#7057ff`, `#28a745`, `#d93f0b` |
+| api | `breaking-change`, `contract-change`, `deprecation`, `versioning`, `consumer-impact` | `#d93f0b`, `#b60205`, `#e4e669`, `#0075ca`, `#7057ff` |
+| microservices | `cross-cutting`, `contract-change`, `migration` | `#7057ff`, `#b60205`, `#e4e669` |
+| generic | *(none)* | — |
+
+Output: `✓ Type labels created` or `✓ Type labels already present` (skip silently for generic).
+
 ### Step 8 — Notify active fallbacks
 
 For each capability that is false, print one line:
@@ -267,20 +343,42 @@ For each capability that is false, print one line:
 ⚠  Sprints not available — using milestone proxy
 ```
 
+### Step 9 — Offer docs scaffold
+
+After all steps complete, ask:
+```
+Scaffold project docs now? [y/n]
+```
+
+- **y** → immediately invoke the docs scaffold flow (MODE: docs Step 1–2) using the `project_type` just configured; create only the type-appropriate files
+- **n** → exit init cleanly; docs can be scaffolded later via `/project-management docs`
+
 ---
 
 ## MODE: docs
 
 ### Step 1 — Ensure docs/ exists
 
-If `docs/` directory does not exist, create it and scaffold all four files (see Step 2).
+If `docs/` directory does not exist, create it and scaffold the type-appropriate files (see Step 2).
 If it exists, skip scaffolding and go to Step 3.
 
-### Step 2 — Scaffold files (first time only)
+### Step 2 — Scaffold files (first time only, type-conditional)
+
+Read `project_type` from `.project/config.yaml`. If absent, treat as `generic`.
+
+**File set by project type:**
+
+| project_type | Files created |
+|---|---|
+| mobile | prd.md, architecture.md, local-storage.md, tools.md (mobile variant) |
+| web | prd.md, architecture.md, database.md, tools.md |
+| api | prd.md, architecture.md, database.md, tools.md, api.md |
+| microservices | architecture.md, services.md, tools.md |
+| generic | prd.md, architecture.md, database.md, tools.md |
 
 Create each file only if it doesn't already exist:
 
-**docs/prd.md**
+**docs/prd.md** *(mobile, web, api, generic)*
 ```markdown
 ## Overview
 
@@ -293,7 +391,7 @@ Create each file only if it doesn't already exist:
 ## Scenarios
 ```
 
-**docs/architecture.md**
+**docs/architecture.md** *(all types)*
 ```markdown
 ## Overview
 
@@ -304,7 +402,7 @@ Create each file only if it doesn't already exist:
 ## Architecture Decisions
 ```
 
-**docs/database.md**
+**docs/database.md** *(web, api, generic)*
 ```markdown
 ## Overview
 
@@ -315,7 +413,54 @@ Create each file only if it doesn't already exist:
 ## Schema Notes
 ```
 
-**docs/tools.md**
+**docs/local-storage.md** *(mobile only — replaces database.md)*
+```markdown
+## Storage Engine
+
+## Data Model
+
+## Migration Strategy
+
+## Sync Strategy
+```
+
+**docs/api.md** *(api, microservices)*
+```markdown
+## Endpoint Catalog
+
+## Versioning Strategy
+
+## Authentication
+
+## Rate Limiting
+
+## Error Format
+
+## Deprecation Policy
+```
+
+**docs/services.md** *(microservices only)*
+```markdown
+## Service Registry
+
+| Name | Port | Health Endpoint | Responsibility |
+|------|------|----------------|----------------|
+| example-svc | 8001 | /health | Brief description |
+
+## Services
+
+### Service: example-svc
+
+**Responsibility**: What this service owns.
+
+**Upstream dependencies**: services or external APIs this service calls.
+
+**Downstream consumers**: services that call this service.
+
+**Data ownership**: entities/tables owned by this service.
+```
+
+**docs/tools.md** *(generic, web, api, microservices variant)*
 ```markdown
 ## Language
 
@@ -330,6 +475,31 @@ Create each file only if it doesn't already exist:
 ## Testing
 
 ## App Dependencies (Docker)
+
+## Linting & Formatting
+```
+
+**docs/tools.md** *(mobile variant — replaces App Dependencies section)*
+```markdown
+## Language
+
+## Framework
+
+## CI/CD
+
+## Command Runner
+
+## Dev Environment
+
+## Testing
+
+## App Signing & Certificates
+
+## Build & Distribution
+
+## App Store
+
+## OTA Updates
 
 ## Linting & Formatting
 ```
@@ -376,6 +546,15 @@ Follow the **Context Fallback Chain** defined in Shared section above. Collect o
 
 #### Step 3 — Generate ticket brief
 
+**BDD seed patterns** — read `project_type` from `.project/config.yaml` and use the matching seeds as vocabulary context when generating `## Scenarios`. Seeds guide language and structure; generated scenarios must still address the specific ticket topic, not copy seeds verbatim. Skip seeds for `generic` or absent `project_type`.
+
+| project_type | Seed patterns (use as vocabulary guidance) |
+|---|---|
+| mobile | `GIVEN user has denied camera permission / WHEN feature requires camera access / THEN app shows permission rationale and graceful fallback`; `GIVEN device switches network mid-operation / WHEN transfer is in progress / THEN app resumes via offline queue without data loss`; `GIVEN app is backgrounded during long operation / WHEN user returns to foreground / THEN session and operation state are restored` |
+| web | `GIVEN API call is in-flight / WHEN component renders / THEN skeleton loader shown, not blank screen`; `GIVEN user submits form with invalid input / WHEN validation runs / THEN inline errors appear and submit stays disabled`; `GIVEN mobile viewport (375px) / WHEN page loads / THEN layout adapts to single-column with accessible touch targets` |
+| api | `GIVEN authenticated user with scope=read:orders / WHEN GET /orders?status=pending / THEN 200 with paginated list and X-Total-Count header`; `GIVEN request without Authorization header / WHEN POST /payments / THEN 401 with WWW-Authenticate challenge`; `GIVEN 51st request in a 60-second window (limit=50/min) / WHEN rate limiter evaluates / THEN 429 Too Many Requests with Retry-After header` |
+| microservices | `GIVEN orders-svc calls inventory-svc.reserveStock() / WHEN inventory-svc returns 503 three times / THEN circuit breaker trips, order stays in PENDING`; `GIVEN payment-svc publishes order.paid event / WHEN notifications-svc is down / THEN event persists in DLQ and is delivered after recovery`; `GIVEN payment succeeds but order creation fails / WHEN saga compensates / THEN payment is refunded and no order record persists` |
+
 Produce the full ticket body with these sections:
 
 ```markdown
@@ -396,6 +575,8 @@ Produce the full ticket body with these sections:
 {minimum 2 SHALL statements}
 
 ## Scenarios
+{generate one GIVEN/WHEN/THEN block per distinct behaviour — use ticket topic and project_type seed patterns below as vocabulary guidance}
+
 GIVEN {precondition}
 WHEN {action}
 THEN {expected outcome}
@@ -531,7 +712,7 @@ For Plane fallback: search issues by `milestone:*` label prefix.
 
 ### Sub-mode: status
 
-Fetch all active sprint tickets. Group by canonical state (reverse-map provider states). Display:
+**Single-repo** (no `context_repos` configured): fetch all active sprint tickets using the anchor's provider. Group by canonical state. Display unchanged v1 format:
 
 ```
 Sprint 4 — 12 tickets
@@ -544,21 +725,46 @@ blocked      1   TICK-41  (blocked by TICK-33)
 done         3   TICK-30, TICK-31, TICK-32
 ```
 
+**Multi-repo** (when `context_repos` is non-empty): apply the same sibling config resolution as `next` MODE Step 1. For each repo with a valid config + active sprint, fetch tickets using that repo's `mcp_prefix`. Display per-repo breakdown followed by cross-repo totals:
+
+```
+Sprint 4  —  across 3 repos  —  28 tickets total
+──────────────────────────────────────────────────────────
+[./]             backlog 1  todo 2  in-progress 1  done 3
+[../mobile-app/] backlog 0  todo 3  in-progress 2  done 2
+[../api-gateway/]backlog 2  todo 1  in-progress 1  done 4
+──────────────────────────────────────────────────────────
+TOTALS           backlog 3  todo 6  in-progress 4  done 9
+
+blocked:
+  TICK-41 (./)             →  blocked by TICK-33 (in-progress)
+  TICK-12 (../api-gateway/)→  blocked by TICK-8  (in-review)
+```
+
+Repos with no `active_sprint` are listed as: `[../service-name/] — no active sprint`.
+
 ---
 
 ## MODE: next
 
-### Step 1 — Load config and active sprint
+### Step 1 — Load config and resolve repo set
 
-Read `.project/config.yaml`. If no `active_sprint` is set, tell the user to create or activate a sprint first.
+Read `.project/config.yaml`. If no `active_sprint` is set on the anchor repo, tell the user to create or activate a sprint first.
 
-### Step 2 — Fetch open in-sprint tickets (single call)
+**Multi-repo expansion**: if `context_repos` is non-empty, read `.project/config.yaml` from each listed path. For each sibling:
+- If the file is missing → emit `⚠ {path} has no .project/config.yaml — skipped` and continue.
+- If `active_sprint` is absent → emit `⚠ {path} has no active sprint — skipped` and continue.
+- Otherwise → record `{ path, mcp_prefix, active_sprint, capabilities }` for use in Step 2.
 
-Call `list_tickets` filtered to active sprint + state != done. Collect: id, title, description, canonical_state, priority, estimate, blocked_by relationships.
+### Step 2 — Fetch open in-sprint tickets
+
+For each repo in the set (anchor + valid siblings), call `list_tickets` filtered to that repo's `active_sprint` + state != done, using that repo's own `mcp_prefix`. Collect: id, title, description, canonical_state, priority, estimate, blocked_by relationships. Tag each ticket with `source_repo` (relative path, `"."` for anchor).
+
+Merge all results into a single candidate pool.
 
 ### Step 3 — Eliminate ineligible tickets
 
-For each ticket with `blocked_by` entries: check if ALL blockers are in `done` state. If any blocker is non-done → remove this ticket from the candidate pool.
+For each ticket with `blocked_by` entries: check if ALL blockers are in `done` state. Blockers may be in any repo in the merged pool — search by ticket ID across all source repos. If any blocker is non-done → remove this ticket from the candidate pool.
 
 ### Step 4 — Score remaining candidates
 
@@ -566,11 +772,12 @@ Rank in this order:
 
 1. **WIP continuation** — tickets already `in-progress` (rank first)
 2. **Priority** — critical > high > medium > low
-3. **Unblocks-others count** — count how many other open tickets list this ticket in their `blocked_by`. Higher = rank higher.
+3. **Unblocks-others count** — count how many open tickets in the merged pool list this ticket in their `blocked_by`. Higher = rank higher.
 4. **Estimate** — if estimates present, prefer smaller (fits in a day)
 
 ### Step 5 — Output recommendation
 
+Single-repo (no context_repos):
 ```
 Next ticket: TICK-42 — Auth token refresh
 Priority: high | Sprint: Sprint 4 | Estimate: 3h
@@ -581,14 +788,24 @@ Reason: High priority, no open dependencies, unblocks 3 other tickets
 Ready to start? /project-management start TICK-42
 ```
 
+Multi-repo (when ticket comes from a sibling repo):
+```
+Next ticket: TICK-17 (../api-gateway/) — Rate limit middleware
+Priority: high | Sprint: Sprint 4 | Estimate: 2h
+
+Reason: High priority, no open dependencies, unblocks 2 tickets (../mobile-app/).
+
+Ready to start? /project-management start TICK-17
+```
+
 ### Step 6 — Empty candidate pool
 
 ```
 No eligible tickets in the active sprint.
 
 Blocked tickets:
-  TICK-41  →  blocked by TICK-33 (in-progress)
-  TICK-44  →  blocked by TICK-38 (in-review)
+  TICK-41 (.)              →  blocked by TICK-33 (in-progress)
+  TICK-12 (../api-gateway) →  blocked by TICK-8 (in-review)
 
 Consider: resolve blockers, add tickets to the sprint, or create new tickets.
 ```

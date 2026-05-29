@@ -1072,9 +1072,104 @@ Read `.project/config.yaml` for `provider.mcp_prefix`. No provider detection nee
 
 Emit `Fetching <id>…` before the call.
 
-Call the get-ticket tool from `tool_contracts.get_ticket` in `references/providers.json` using `{mcp_prefix}`. Collect: id, title, description, state (raw), labels, assignees, sprint membership, priority, issue_type.
+Call the get-ticket tool from `tool_contracts.get_ticket` in `references/providers.json` using `{mcp_prefix}`. Collect: id, title, description, state (raw), labels, assignees, sprint membership, priority, issue_type, and all additional fields returned by the MCP response.
 
 Emit `✓ Loaded: "<title>"` on success.
+
+#### Step 2b — Rank and trim comments
+
+If the ticket has more than 10 comments, score each and keep only the most relevant:
+
+```python
+import re
+
+comments = ticket.get("comments") or []
+if len(comments) > 10:
+    author    = ticket.get("author", "")
+    assignees = set(ticket.get("assignees") or [])
+    code_re   = re.compile(
+        r'https?://\S+/-/(?:merge_requests|pull)/\d+'
+        r'|`[^`]{4,}`'
+        r'|(?:branch|commit|pr|mr)\b',
+        re.IGNORECASE)
+    bot_re    = re.compile(r'\[bot\]|^(github-actions|dependabot|renovate)$', re.IGNORECASE)
+
+    def score(c):
+        s = 0
+        if c.get("author") == author:           s += 3
+        if c.get("author") in assignees:        s += 3
+        if bot_re.search(c.get("author", "")):  s -= 5
+        if code_re.search(c.get("body", "")):   s += 2
+        if len(c.get("body", "")) > 100:        s += 1
+        return s
+
+    ranked  = sorted(comments, key=score, reverse=True)
+    recents = comments[-3:]
+    top     = [c for c in ranked if c not in recents][:7]
+    merged  = top + recents
+    seen = set(); priority_comments = []
+    for c in merged:
+        cid = c.get("id") or c.get("body", "")[:40]
+        if cid not in seen: seen.add(cid); priority_comments.append(c)
+    comments_total = len(comments)
+    comments_shown = len(priority_comments)
+else:
+    priority_comments = comments
+    comments_total = comments_shown = len(comments)
+```
+
+Carry `priority_comments`, `comments_total`, and `comments_shown` forward to Step 6.
+
+#### Step 2c — Collect custom provider fields
+
+After the `get_ticket` call, collect all fields returned by the MCP response that are NOT in the standard set (`id`, `title`, `description`, `state`, `labels`, `assignees`, `sprint`, `priority`, `issue_type`, `url`, `author`, `comments`). Filter to non-null, non-empty values only. Store as `custom_fields` (key-value dict).
+
+If no custom fields are present, set `custom_fields = {}`.
+
+Carry `custom_fields` forward to Step 6.
+
+#### Step 2d — Scan for code cross-references
+
+Scan `ticket.description` and all comment bodies for code references:
+
+```python
+import re
+
+full_text = (ticket.get("description") or "") + "\n" + \
+            "\n".join(c.get("body", "") for c in (ticket.get("comments") or []))
+
+refs = []
+refs += re.findall(r'https?://\S+/-/merge_requests/\d+', full_text)
+refs += re.findall(r'https?://github\.com/\S+/pull/\d+', full_text)
+refs += re.findall(r'(?:branch[:\s]+|`)([\w./-]{4,80})(?:`|)', full_text, re.IGNORECASE)
+refs += re.findall(r'(?<!\w)([0-9a-f]{7,40})(?!\w)', full_text)
+
+seen = set(); ticket_code_refs = []
+for r in refs:
+    if r not in seen: seen.add(r); ticket_code_refs.append(r)
+ticket_code_refs = ticket_code_refs[:10]
+```
+
+Carry `ticket_code_refs` forward to Step 6.
+
+#### Step 2e — Fetch linked issues (thin description only)
+
+Check if the description is insufficient: fewer than 150 characters, empty, or contains only cross-reference links with no prose.
+
+```python
+import re
+desc = (ticket.get("description") or "").strip()
+cross_ref_only = bool(re.search(r'^[\s\S]*$', desc)) and not re.search(r'[a-z]{5,}', desc)
+thin = len(desc) < 150 or not desc or cross_ref_only
+```
+
+If `thin` is true: look up `tool_contracts.list_issue_relations` (or equivalent) for the active provider in `references/providers.json`. If the tool exists in the current MCP context, call it with the ticket ID. Normalize results to a list of `{id, state, title}` objects and store as `linked_issues`.
+
+If the tool does not exist for the provider, or the call fails for any reason: set `linked_issues = []` and continue — no error shown.
+
+If `thin` is false: set `linked_issues = []` and skip the MCP call.
+
+Carry `linked_issues` forward to Step 6.
 
 ### Step 3 — Project doc context (Context Fallback Chain)
 
@@ -1169,6 +1264,18 @@ Assignees:  [ticket.assignees joined by ", "]
 
 --- Description ---
 [ticket.description, up to 3000 chars]
+
+--- Comments [if comments_total > comments_shown: "(comments_shown of comments_total shown — ranked by relevance)"] ---
+[priority_comments, each as "[author]: body"]
+
+--- Linked Issues ---
+[linked_issues if non-empty, each as "  ID [state] title" — omit this section entirely if linked_issues is empty]
+
+--- Provider Fields ---
+[custom_fields key-value pairs, each as "  key: value" — omit this section entirely if custom_fields is empty]
+
+--- Code References in Issue ---
+[ticket_code_refs, one per line — or "(none found)" if list is empty]
 
 --- Project Context ---
 [context_refs from Step 3, one block per matched source, e.g.:]

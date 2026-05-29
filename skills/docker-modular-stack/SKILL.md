@@ -1,7 +1,14 @@
 ---
 name: docker-modular-stack
-description: Define, scaffold, and lint Docker services for any project. Three modes: (1) Scaffold — copy curated templates (postgres, valkey, grafana, langfuse, litellm, 30+ more) into a new project with generated docker-compose.yaml, .env, and Taskfile; (2) Add — given any tool's documentation, derive a compliant service.yaml from scratch; (3) Lint — validate any service definition against the project's conventions. Use when setting up a docker stack, adding a new docker service from docs, or checking whether a service definition is correct.
-compatibility: Requires Docker and Docker Compose v2. Target project must have a writable root directory.
+description: >
+  Define, scaffold, and lint Docker services for any project. Three modes: (1) Scaffold — copy
+  curated templates (postgres, valkey, grafana, langfuse, litellm, 30+ more) into a new project
+  with generated docker-compose.yaml, .env, and Taskfile; (2) Add — given any tool's
+  documentation, derive a compliant service.yaml from scratch; (3) Lint — validate any service
+  definition against the project's conventions. Use when setting up a docker stack, adding a new
+  docker service from docs, or checking whether a service definition is correct.
+compatibility: >
+  Requires Docker and Docker Compose v2. Target project must have a writable root directory.
 ---
 
 # docker-modular-stack

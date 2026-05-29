@@ -6,7 +6,8 @@ description: >
   pre-loaded. Use when a user mentions a ticket number, issue key, or issue URL and wants
   to explore the implementation before starting a change. Works correctly when the issue
   tracker and the code host are different systems (e.g. Jira issues + GitLab code).
-compatibility: Requires git. Fetch method is resolved in order: glab/gh/jira CLI → MCP server → API token env var.
+compatibility: >
+  Requires git. Fetch method is resolved in order: glab/gh/jira CLI → MCP server → API token env var.
 metadata:
   author: pavan.katakam@senecaglobal.com
   providers: gitlab, github, jira, plane

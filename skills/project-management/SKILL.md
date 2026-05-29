@@ -3,16 +3,19 @@ name: project-management
 description: >
   Provider-agnostic project management skill. Manages local project docs (docs/prd.md,
   docs/architecture.md, docs/database.md, docs/tools.md) and connects to any supported
-  issue tracker (GitHub, GitLab, Jira, Plane) via MCP. Seven modes: init (configure
+  issue tracker (GitHub, GitLab, Jira, Plane) via MCP. Eight modes: init (configure
   provider, probe plan capabilities), docs (scaffold and edit project docs; suggests
-  docker-modular-stack for Docker dependencies), ticket (create rich opsx-ready ticket
-  briefs with requirements, BDD scenarios, use cases; CRUD; all relationship types;
-  canonical lifecycle), sprint (manage sprints/milestones/cycles and labels), next
-  (algorithmic daily ticket recommendation from dependency graph and priority), start
-  (fetch a specific ticket by ID, enrich with project doc context, transition state,
-  create branch, invoke opsx:explore), status (sprint board grouped by canonical state).
-  Context for tickets is relevance-filtered from docs and falls back to local repo files
-  or configured sibling repos.
+  docker-modular-stack for Docker dependencies), bulk (generate a full backlog from docs/
+  — reads all docs files, produces typed dependency-ordered ticket manifest, deduplicates
+  against existing tickets, human review then creates in one pass), ticket (create rich
+  opsx-ready ticket briefs with requirements, BDD scenarios, use cases; CRUD; all
+  relationship types; canonical lifecycle; intelligent scope-width detection proposes
+  breakdown into multiple tickets when input covers broad scope), sprint (manage
+  sprints/milestones/cycles and labels), next (algorithmic daily ticket recommendation
+  from dependency graph and priority), start (fetch a specific ticket by ID, enrich with
+  project doc context, transition state, create branch, invoke opsx:explore), status
+  (sprint board grouped by canonical state). Context for tickets is relevance-filtered
+  from docs and falls back to local repo files or configured sibling repos.
 compatibility: >
   Requires one MCP server configured: mcp__github__, mcp__gitlab__, mcp__jira__, or
   mcp__plane__. Run /project-management init before first use.
@@ -68,6 +71,7 @@ Run Query Normalization first, then route:
 | "what should I work on", "next ticket", "what's next", "suggest a task" | **next** |
 | "start TICK-42", "work on TICK-42", "begin TICK-42", "let's work on #42", "start {any ticket id or URL}" | **start** |
 | "show board", "sprint board", "show progress", "what's in flight" | **status** |
+| "bulk", "generate tickets", "create tickets from docs", "populate backlog", "generate backlog" | **bulk** |
 
 ---
 
@@ -115,6 +119,105 @@ When generating ticket context, follow this chain — stop at first hit, only in
 ```
 
 Never dump an entire docs file. Only include sections/paragraphs where the topic appears.
+
+---
+
+## Shared: Scope-Width Detection Signals
+
+Used by `ticket new` to decide whether a single-ticket request describes broad scope that warrants a breakdown offer. Evaluate the three signals below. If **any one** is true, offer a breakdown before proceeding with single-ticket creation.
+
+### Signal 1 — Conjunction
+Input contains `"and"` linking two distinct domain nouns, **or** a comma-separated list of ≥2 domain items.
+- Triggers: `"auth and profile management"`, `"login, logout, and token refresh"`
+- Does NOT trigger: `"retry logic and error handling for the auth endpoint"` — this is one concern, not two distinct domain nouns
+
+### Signal 2 — Plural area word (without specific action verb)
+Input contains one of the known **domain area words** but does NOT also contain a **specific action verb**.
+
+**Known domain area words**: `auth`, `authentication`, `users`, `payments`, `notifications`, `settings`, `admin`, `administration`, `reporting`, `reports`, `search`, `onboarding`
+
+**Specific action verbs that suppress the signal**: `create`, `delete`, `remove`, `update`, `refresh`, `fetch`, `get`, `display`, `show`, `render`, `add`, `reset`, `validate`, `send`, `handle`
+
+- Triggers: `"create a ticket for the auth system"`, `"auth features"`, `"user management"` (no specific action)
+- Does NOT trigger: `"refresh the auth token"`, `"fetch user profile"` — specific action verb present
+
+### Signal 3 — Docs breadth
+Run a quick relevance scan across all `docs/` files. If ≥3 **distinct doc sections** (across any combination of files) match the input topic, the signal is true.
+
+- Triggers: topic "authentication" matches prd.md §Features, architecture.md §Components, database.md §Entities, and api.md §Endpoints (4 sections across 4 files)
+- Does NOT trigger: topic matches only prd.md §Features and architecture.md §Components (2 sections)
+
+### Breakdown offer prompt (when any signal triggers)
+```
+I see enough scope here for multiple tickets — propose a breakdown? [y/n]
+```
+- **y** → run decomposition scoped to doc sections matching the input topic; present manifest using the **Shared: Manifest Review** format
+- **n** → proceed with normal single-ticket creation using the original input unchanged
+
+---
+
+## Shared: Manifest Review
+
+Used by both `bulk` mode and `ticket new` breakdown flow. This is the mandatory human review step — no MCP ticket creation calls are made until `create` is confirmed.
+
+### Manifest table format
+
+Display candidates grouped by epic. Within each epic group, order by type: `scaffold` and `migration` first, then `feature`, `task`, `maintenance`, `spike`.
+
+```
+Found N ticket candidates from <file list> (dedup: M existing tickets checked)
+
+┌────┬──┬────────────────────────────────────────┬────────────┬──────────┐
+│ #  │✓ │ Title                                  │ Type       │ Epic     │
+├────┼──┼────────────────────────────────────────┼────────────┼──────────┤
+│  1 │✓ │ Set up AuthService (scaffold)          │ scaffold   │ Auth     │
+│  2 │✓ │ Create sessions table                  │ migration  │ Auth     │
+│  3 │✓ │ Auth token silent refresh              │ feature    │ Auth     │
+│  4 │✓ │ Logout across all devices              │ feature    │ Auth     │
+│  5 │✗ │ Admin revoke all sessions ⚠ dup #12   │ feature    │ Auth     │
+├────┼──┼────────────────────────────────────────┼────────────┼──────────┤
+│  6 │✓ │ Set up GitHub Actions CI pipeline      │ maintenance│ DevOps   │
+└────┴──┴────────────────────────────────────────┴────────────┴──────────┘
+
+Edit commands: skip <n> | keep only <n,n,...> | check <n> | rename <n> <title>
+               merge <n,n> | type <n> <type> | create
+```
+
+### Edit commands
+
+| Command | Syntax | Effect |
+|---|---|---|
+| skip | `skip <n>` | Uncheck row n (set to ✗) |
+| keep only | `keep only <n>,<n>,...` | Uncheck all rows except the listed numbers |
+| check | `check <n>` | Re-check row n (set to ✓) |
+| rename | `rename <n> <new title>` | Update the title of row n |
+| merge | `merge <n>,<n>` | Combine two rows — prompt user to confirm or override merged title, then collapse to one row |
+| type | `type <n> <type>` | Change ticket type of row n (valid: feature, task, scaffold, migration, maintenance, spike) |
+| create | `create` | Finalize — show confirmation, then create all ✓ tickets |
+
+After any edit command (except `create`), re-display the full updated manifest.
+
+For invalid commands, output:
+```
+Unknown command. Valid commands: skip, keep only, check, rename, merge, type, create
+```
+Then re-display the manifest unchanged.
+
+### Create confirmation step
+
+When `create` is issued:
+1. Echo the final checked ticket list and count:
+   ```
+   Creating 8 tickets:
+     1. Set up AuthService (scaffold)
+     2. Create sessions table
+     ...
+   Confirm? [y/n]
+   ```
+2. On `y` → begin MCP creation calls sequentially. For each:
+   - Success: `✓ Created: <title> (#<id>)`
+   - Failure: `✗ Failed: <title> — <error>` (continue with remaining tickets regardless)
+3. On `n` → return to manifest for further editing.
 
 ---
 
@@ -528,6 +631,119 @@ If any match found, output:
 
 ---
 
+## MODE: bulk
+
+Generate a full backlog from the project's `docs/` folder. Reads all applicable doc files, produces a typed dependency-ordered manifest of ticket candidates, deduplicates against existing tracker tickets, then creates all approved tickets in one pass.
+
+### Step 1 — Read all applicable docs/ files
+
+Read `project_type` from `.project/config.yaml`. Read every doc file that exists in `docs/` and is applicable to the project type (same file set as `docs` mode scaffold). Silently skip any file that does not exist.
+
+| project_type | Doc files to read |
+|---|---|
+| mobile | prd.md, architecture.md, local-storage.md, tools.md |
+| web | prd.md, architecture.md, database.md, tools.md |
+| api | prd.md, architecture.md, database.md, api.md, tools.md |
+| microservices | architecture.md, services.md, tools.md |
+| generic | prd.md, architecture.md, database.md, tools.md |
+
+Collect all file paths that were successfully read. These become the `source_files` list shown in the manifest header.
+
+### Step 2 — Map doc sections to ticket candidates
+
+Apply the section-to-ticket-type mapping below. Use case-insensitive prefix matching on section header text. Sections that do not match any known prefix are ignored.
+
+| Doc file | Section header prefix | Ticket type | Candidate title pattern |
+|---|---|---|---|
+| `prd.md` | `Features` | `feature` | One candidate per distinct feature entry |
+| `prd.md` | `Non-Functional`, `NFR` | `maintenance` | One candidate per distinct NFR |
+| `architecture.md` | `Components` | `scaffold` | "Set up {Component name}" |
+| `architecture.md` | `Data Flow` | `task` | One candidate per data flow entry |
+| `architecture.md` | `Decisions` | `spike` | Only entries containing "TBD", "evaluate", or "?" — "Spike: {decision}" |
+| `database.md` / `local-storage.md` | `Entities`, `Data Model` | `migration` | "Create {entity} table/schema" |
+| `api.md` | `Endpoint` | `task` | One candidate per endpoint group |
+| `tools.md` | `CI/CD` | `maintenance` | "Set up CI/CD pipeline" |
+| `tools.md` | `Testing` | `maintenance` | "Set up test harness" |
+| `tools.md` | `Dev Environment` | `maintenance` | "Set up local dev environment" |
+| `tools.md` | `App Dependencies` | `maintenance` | One candidate per listed service |
+| `services.md` | `### Service:` | `scaffold` | "Scaffold {service name} service" |
+
+For `prd.md §Features`, generate one `feature` candidate per distinct bullet point, heading, or named feature description. Do not split a single feature bullet into multiple candidates.
+
+For `prd.md §Scenarios` (GIVEN/WHEN/THEN blocks), use them to supplement the feature tickets they relate to (add to context) rather than generating standalone candidates.
+
+### Step 3 — Deduplicate against existing tracker tickets
+
+Emit: `Scanning existing tickets for duplicates…`
+
+Call `list_tickets` using the active provider MCP tool. If the call succeeds:
+- For each candidate, check if any existing open ticket title has >80% word overlap with the candidate title (case-insensitive, ignore filler words: the, a, an, is, to, for, in, on, with, of, and, or)
+- Matches: set candidate `checked = false` and append `⚠ possible duplicate of #<id>` to the title
+- Non-matches: set candidate `checked = true`
+
+If `list_tickets` fails or times out:
+- Set all candidates `checked = true`
+- Record: dedup_status = `"⚠ Dedup skipped — could not reach tracker"`
+
+### Step 4 — Sort candidates by dependency order
+
+Order candidates within each epic group as follows:
+1. `scaffold` tickets first
+2. `migration` tickets second
+3. `feature`, `task`, `maintenance`, `spike` tickets after
+
+For cross-epic ordering, scaffold/migration tickets that share a component or entity name with a feature/task ticket are output before that feature/task ticket, with an implicit blocking relationship noted in the manifest `Blocks` indicator (shown only when a relationship exists).
+
+To infer relationships: match component names from `architecture.md §Components` and entity names from `database.md §Entities` against the descriptions of feature/task candidates. If the component/entity name appears in the feature candidate title or description → infer a dependency.
+
+### Step 5 — Build manifest header
+
+Compose the one-line header:
+- Successful dedup: `Found N ticket candidates from <file1>, <file2>, ... (dedup: M existing tickets checked)`
+- Skipped dedup: `Found N ticket candidates from <file1>, <file2>, ... ⚠ Dedup skipped — could not reach tracker`
+
+### Step 6 — Display manifest and await edit commands
+
+Display the manifest header followed by the manifest table using the format defined in **Shared: Manifest Review**. Await edit commands.
+
+When `create` is confirmed, proceed to Step 7.
+
+### Step 7 — Generate ticket bodies and create
+
+For each checked ticket row, generate the full ticket body using the existing body generation logic (Summary, Context, Requirements, Scenarios, Use Cases, Non-Functional, OpenSpec Hint). Use the manifest row's **title**, **type**, and **source doc section** as the primary input (in place of conversational description). The `## Context` block MUST include:
+
+```
+> Derived from <doc file> §<section>
+```
+
+as the first reference line, followed by any additional context from the fallback chain.
+
+Call `create_ticket` for each ticket using the generated body. Acknowledge each result:
+- Success: `✓ Created: <title> (#<id>)`
+- Failure: `✗ Failed: <title> — <error>` (continue with remaining tickets)
+
+### Step 8 — Post-create offers
+
+After all create calls complete:
+
+**Sprint assignment offer** (only if `active_sprint` is set in `.project/config.yaml`):
+```
+Add all N created tickets to Sprint {name}? [y/n]
+```
+On `y`: call sprint assignment MCP tool for each successfully created ticket.
+
+**Epic label offer** (only if manifest had ≥2 distinct epic groups):
+```
+Create epic labels for {Epic1}, {Epic2}, {Epic3}? [y/n]
+```
+On `y`:
+1. Derive slug for each epic: lowercase, spaces → hyphens, strip special chars (e.g. "Auth System" → `epic:auth-system`)
+2. Call `list_labels` to check which epic labels already exist
+3. Call `create_label` for any missing epic labels (colour `#e99695`)
+4. Call `add_label` to attach each epic label to the relevant tickets in that group
+
+---
+
 ## MODE: ticket
 
 Detect sub-mode from user intent: **new** | **update** | **link** | **list** | **lifecycle**
@@ -535,6 +751,17 @@ Detect sub-mode from user intent: **new** | **update** | **link** | **list** | *
 ---
 
 ### Sub-mode: ticket new
+
+#### Step 0 — Scope-width check (breakdown detection)
+
+Before collecting any input, evaluate the user's message against the three signals defined in **Shared: Scope-Width Detection Signals**.
+
+If any signal is true:
+- Offer: `"I see enough scope here for multiple tickets — propose a breakdown? [y/n]"`
+- **y** → run decomposition scoped to the doc sections matching the input topic; present the **Shared: Manifest Review** table; stop the single-ticket flow (the manifest handles creation from here)
+- **n** → continue to Step 1 as normal, treating the original input as a single ticket request
+
+If no signal is true, skip this step entirely and proceed to Step 1.
 
 #### Step 1 — Collect input
 
@@ -545,6 +772,14 @@ Minimum required: ticket title. Ask for at minimum one label or sprint assignmen
 Follow the **Context Fallback Chain** defined in Shared section above. Collect only relevant pieces. Build a `context_refs` list.
 
 #### Step 3 — Generate ticket brief
+
+> **Note on entry points**: This body generation step is invoked from three places:
+> 1. Direct `ticket new` conversational input (standard path — use the user's description as the primary input)
+> 2. `bulk` mode manifest creation — use the manifest row's **title**, **type**, and **source doc section** as the primary input instead of a conversational description
+> 3. `ticket new` breakdown manifest creation — same as bulk mode, scoped to matching doc sections
+>
+> For manifest-sourced tickets (paths 2 and 3), the `## Context` block MUST begin with:
+> `> Derived from <doc file> §<section name>` as the first reference line, before any other fallback chain results.
 
 **BDD seed patterns** — read `project_type` from `.project/config.yaml` and use the matching seeds as vocabulary context when generating `## Scenarios`. Seeds guide language and structure; generated scenarios must still address the specific ticket topic, not copy seeds verbatim. Skip seeds for `generic` or absent `project_type`.
 

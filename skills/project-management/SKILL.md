@@ -3,14 +3,16 @@ name: project-management
 description: >
   Provider-agnostic project management skill. Manages local project docs (docs/prd.md,
   docs/architecture.md, docs/database.md, docs/tools.md) and connects to any supported
-  issue tracker (GitHub, GitLab, Jira, Plane) via MCP. Six modes: init (configure
+  issue tracker (GitHub, GitLab, Jira, Plane) via MCP. Seven modes: init (configure
   provider, probe plan capabilities), docs (scaffold and edit project docs; suggests
   docker-modular-stack for Docker dependencies), ticket (create rich opsx-ready ticket
   briefs with requirements, BDD scenarios, use cases; CRUD; all relationship types;
   canonical lifecycle), sprint (manage sprints/milestones/cycles and labels), next
-  (algorithmic daily ticket recommendation from dependency graph and priority), status
-  (sprint board grouped by canonical state). Context for tickets is relevance-filtered
-  from docs and falls back to local repo files or configured sibling repos.
+  (algorithmic daily ticket recommendation from dependency graph and priority), start
+  (fetch a specific ticket by ID, enrich with project doc context, transition state,
+  create branch, invoke opsx:explore), status (sprint board grouped by canonical state).
+  Context for tickets is relevance-filtered from docs and falls back to local repo files
+  or configured sibling repos.
 compatibility: >
   Requires one MCP server configured: mcp__github__, mcp__gitlab__, mcp__jira__, or
   mcp__plane__. Run /project-management init before first use.
@@ -30,6 +32,7 @@ Read the user's intent and pick one mode:
 | "new sprint", "start sprint", "add to sprint", "remove from sprint", "create label", "sprint status" | **sprint** |
 | "create milestone", "new milestone", "release milestone", "assign milestone", "list milestones", "close milestone" | **sprint → milestone** |
 | "what should I work on", "next ticket", "what's next", "suggest a task" | **next** |
+| "start TICK-42", "work on TICK-42", "begin TICK-42", "let's work on #42", "start {any ticket id or URL}" | **start** |
 | "show board", "sprint board", "show progress", "what's in flight" | **status** |
 
 ---
@@ -575,8 +578,7 @@ Priority: high | Sprint: Sprint 4 | Estimate: 3h
 Reason: High priority, no open dependencies, unblocks 3 other tickets
         (TICK-45, TICK-46, TICK-47).
 
-To start: /project-management ticket update TICK-42 --state in-progress
-Ready to spec? /opsx:ff auth token refresh using this ticket as context
+Ready to start? /project-management start TICK-42
 ```
 
 ### Step 6 — Empty candidate pool
@@ -590,6 +592,184 @@ Blocked tickets:
 
 Consider: resolve blockers, add tickets to the sprint, or create new tickets.
 ```
+
+---
+
+## MODE: start
+
+Accept a ticket reference and load it for exploration with full project doc context. Accepts `--no-branch` flag to skip branch creation.
+
+### Step 1 — Parse ticket reference
+
+Detect the input form and normalise to `(ticket_id, is_url)`:
+
+| Input form | Example | Action |
+|---|---|---|
+| Full URL | `https://github.com/org/repo/issues/42` | Extract issue number from path |
+| Key format | `PROJ-42` | Use as-is |
+| Hash format | `#42` | Strip `#`, treat as bare number |
+| Bare number | `42` | Use as numeric issue ID |
+
+**Jira bare-number guard**: if `config.provider.name == "jira"` and input is a bare number, ask:
+> "Jira requires a full key format. What is your project key prefix? (e.g. `PROJ`)"
+Reconstruct as `PREFIX-<number>` and continue.
+
+### Step 2 — Fetch ticket
+
+Read `.project/config.yaml` for `provider.mcp_prefix`. No provider detection needed — the project is already configured.
+
+Emit `Fetching <id>…` before the call.
+
+Call the get-ticket tool from `tool_contracts.get_ticket` in `references/providers.json` using `{mcp_prefix}`. Collect: id, title, description, state (raw), labels, assignees, sprint membership, priority, issue_type.
+
+Emit `✓ Loaded: "<title>"` on success.
+
+### Step 3 — Project doc context (Context Fallback Chain)
+
+Follow the **Context Fallback Chain** defined in the Shared section above — identical logic to `ticket new`. Filter to sections relevant to the ticket's title and description topic. Build a `context_refs` list.
+
+If all chain steps miss, emit:
+```
+⚠ No relevant context found — Context section may be incomplete.
+```
+
+### Step 4 — State transition
+
+Reverse-map the raw provider state to canonical state via `state_mapping`:
+
+| Canonical state | Action |
+|---|---|
+| `todo` | Ask: "Move TICK-<id> to in-progress? [y/n]" → on Y call `update_ticket` translating via `state_mapping` |
+| `in-progress` | Silent no-op — already started |
+| `backlog` | Warn: "TICK-<id> is in backlog and not assigned to the active sprint. Continue anyway? [y/n]" |
+| `in-review` or `done` | Warn: "TICK-<id> is already `<state>` — continuing in exploration mode." |
+| `blocked` | Warn: "TICK-<id> is blocked. Note the blocker before exploring." |
+
+### Step 5 — Branch creation
+
+> **Skip this step entirely if `--no-branch` was passed.** Set `BRANCH_SKIPPED=true` and go to Step 6.
+
+#### Step 5a — Detect branching strategy
+
+Run `git branch -a --format=%(refname:short)` and infer from topology:
+
+| Branch topology | Strategy | Base branch |
+|---|---|---|
+| `develop` + `release` + `hotfix` present | gitflow | `develop` |
+| `develop` or `dev` + `release` | gitflow-lite | `develop` |
+| `develop`, `dev`, or `development` only | three-branch | detected dev branch |
+| `release/*` branches, no develop | trunk-release | `main`/`master` |
+| No develop branch | single-branch | `main`/`master` |
+
+Tell the user: "Detected [strategy] — branching from `[base_branch]`."
+
+#### Step 5b — Derive branch name slug
+
+Apply this prompt to yourself:
+
+```
+Issue title:       {ticket.title}
+Issue description: {ticket.description[:300] if present, else "(none)"}
+
+Rules:
+1. Output ONLY the slug — no explanation, no quotes.
+2. 2–4 lowercase words joined by hyphens.
+3. Choose the most identifying domain/technical words.
+4. One optional short action verb (fix, add, migrate) only when meaningful.
+5. Omit filler words (the, a, an, is, to, for, in, on, with, of, and…).
+
+Slug:
+```
+
+Determine branch prefix from `issue_type`:
+- `bug` → `bug/` (or `hotfix/` for gitflow strategies)
+- `feature`, `task`, `story`, or unknown → `feature/`
+- `hotfix` → `hotfix/`
+
+Compose: `{prefix}{ticket.id}-{slug}` (e.g. `feature/PROJ-42-oauth-login`)
+
+#### Step 5c — Confirm and create
+
+Ask:
+```
+Ready to create branch:
+  [BRANCH_NAME]  (from [BASE_BRANCH])
+Create it now? [Y/n] — or type a different name to override.
+```
+
+- **Y** or Enter: run `git checkout [BASE_BRANCH] && git pull origin [BASE_BRANCH] && git checkout -b [BRANCH_NAME]`
+- **Custom name**: sanitize (`re.sub(r'[^a-z0-9/._-]', '-', name.lower()).strip('-')`) and create with that name
+- **n**: tell user "Skipping branch creation — continuing in exploration mode." Set `BRANCH_SKIPPED=true`.
+
+### Step 6 — Assemble context block
+
+Build the context block:
+
+```
+=== [provider] Ticket: [id] ===
+URL:        [ticket.url if available]
+Title:      [ticket.title]
+State:      [canonical_state]
+Type:       [ticket.issue_type]
+Labels:     [ticket.labels joined by ", "]
+Priority:   [ticket.priority]
+Assignees:  [ticket.assignees joined by ", "]
+
+--- Description ---
+[ticket.description, up to 3000 chars]
+
+--- Project Context ---
+[context_refs from Step 3, one block per matched source, e.g.:]
+> Derived from docs/prd.md §Features — Token Refresh
+> Component: AuthService (docs/architecture.md §Components)
+> Entity: sessions (docs/database.md §Entities)
+> See: src/auth/token_service.py
+
+=== Code Repository ===
+Branch:   [git rev-parse --abbrev-ref HEAD]
+Remote:   [git remote get-url origin]
+
+Recent commits:
+[git log --oneline -5]
+```
+
+If `BRANCH_SKIPPED` is false, append:
+```
+Branch:   [BRANCH_NAME]  (from [BASE_BRANCH])
+```
+
+### Step 7 — Invoke opsx:explore
+
+#### Step 7a — Detect opsx:explore
+
+Scan the `system-reminder` skills list for `opsx:explore`. If present, invoke it with the context block assembled in Step 6 and this prompt:
+
+```
+I want to explore the implementation for this ticket before starting work:
+
+<context block>
+
+Let's think through: requirements, ambiguities, edge cases, and which parts of the codebase are likely involved.
+```
+
+#### Step 7b — Fallback if opsx:explore not loaded
+
+Present the context block directly to the user, then offer:
+
+```
+No spec skill loaded — context above is ready.
+
+What would you like to do?
+  1. Find files in this repo likely affected by this ticket
+  2. List open questions, ambiguities, and edge cases
+  3. Summarise what needs to be implemented
+  4. Check for related branches or PRs
+  5. Start implementing now
+
+Reply with a number, or ask anything about the ticket.
+```
+
+Wait for the user's reply and act on it directly.
 
 ---
 

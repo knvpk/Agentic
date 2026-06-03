@@ -2314,8 +2314,16 @@ I want to explore the implementation for this ticket before starting work:
 
 <context block>
 
+Ticket context for linked issue tracking:
+  provider: <provider name from config>
+  project_ref: <project path or key from config>
+  id: "<ticket id>"
+  url: <ticket URL>
+
 Let's think through: requirements, ambiguities, edge cases, and which parts of the codebase are likely involved.
 ```
+
+This ticket context block is passed so that if `opsx:new` is invoked during the explore session, it can write `linked_issue` to `.openspec.yaml` automatically.
 
 #### Step 7b — Fallback if opsx:explore not loaded
 

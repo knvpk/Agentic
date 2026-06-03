@@ -87,6 +87,96 @@ Archive a completed change in the experimental workflow.
    - Spec sync status (synced / sync skipped / no delta specs)
    - Note about any warnings (incomplete artifacts/tasks)
 
+7. **Linked issue sync (post-archive)**
+
+   Read `linked_issue` from the archived `.openspec.yaml` at `openspec/changes/archive/YYYY-MM-DD-<name>/.openspec.yaml`.
+
+   **If `linked_issue` is absent**: print terminal-only summary line "No linked issue — skipping ticket sync." and stop.
+
+   **If `linked_issue` is present**: proceed through signal gathering, synthesis, and post steps below.
+
+   #### 7a — Gather signals (run in parallel where possible)
+
+   **Signal 1 — Spec diff**
+
+   Check for delta specs at `openspec/changes/archive/YYYY-MM-DD-<name>/specs/`. If none exist, set spec_signal = empty.
+
+   If delta specs exist, for each `openspec/changes/archive/YYYY-MM-DD-<name>/specs/<capability>/spec.md`:
+   - Read the delta spec
+   - Read the corresponding main spec at `openspec/specs/<capability>/spec.md` (may not exist yet if this was a new capability)
+   - Extract: new requirements (lines/sections added), modified requirements, new capabilities, removed capabilities
+   - Label as `spec_signal` (list of bullet points)
+
+   **Signal 2 — Git diff**
+
+   Determine the diff range:
+   - If `.openspec.yaml` has `base_ref`: use `git diff <base_ref>..HEAD --stat`
+   - Otherwise: use `git diff $(git merge-base HEAD main)..HEAD --stat` (try `main`, then `master`, then `develop` as base)
+
+   ```bash
+   git diff <range> --stat
+   ```
+
+   Extract:
+   - Top 10 changed files by line count (skip binary files)
+   - Total: N files changed, X insertions, Y deletions
+   - Label as `git_signal`
+
+   **Signal 3 — Session thread**
+
+   Scan the current conversation for:
+   - Explicit decisions (phrases like "we decided", "going with", "ruled out", "won't", "will not")
+   - Scope changes ("scope changed", "out of scope", "added to scope")
+   - Ticket references (`#N`, `PROJ-N`, issue URLs) — collect separately as `related_refs`
+   - Label as `thread_signal`
+
+   #### 7b — Skip heuristic
+
+   Skip posting if ALL of the following are true:
+   - `spec_signal` is empty or contains only whitespace/formatting changes
+   - `git_signal` touches only `.md` files or is empty
+   - `thread_signal` has no detected decisions or scope changes
+
+   If skipping: print "No substantive changes detected — skipping ticket comment." and stop.
+
+   #### 7c — Synthesis
+
+   Combine non-empty signals into a structured comment draft:
+
+   ```
+   ## Change `<name>` archived
+
+   **Specs:** <spec diff summary, or "no delta specs">
+   **Code:** <top changed files with +/- counts, or "no code changes detected">
+   **Decisions:** <thread conclusions as bullets, or "none recorded this session">
+   ```
+
+   #### 7d — Confirmation and post
+
+   Show the draft comment to the user. Use **AskUserQuestion** to ask:
+   > "Post this summary to <provider> issue #<id>?"
+   Options: "Post it", "Edit first", "Skip"
+
+   If "Edit first": show the draft as plain text, let the user provide edits, then re-confirm.
+
+   If "Post it" or after edits confirmed:
+   - Route via provider:
+     - **GitHub**: `mcp__github__add_issue_comment` (repo from `project_ref`, issue_number from `id`)
+     - **GitLab**: `mcp__gitlab__create_note` → fallback `glab issue note <id> -m "..."` → fallback `curl` REST (`POST /api/v4/projects/<gitlab_project_id>/issues/<id>/notes`)
+     - **Jira**: Jira comment API via configured MCP prefix
+     - **Plane**: Plane comment API via configured MCP prefix
+   - On write failure: print the comment text to terminal with "⚠ Could not write to tracker — copy and post manually."
+
+   **If spec diff added new requirements**, separately ask:
+   > "Append these new acceptance criteria to the ticket body?"
+   Options: "Yes, append", "Skip"
+   - If yes: fetch current ticket body, append a `## Acceptance Criteria (from <name>)` section, write back via provider adapter. Do NOT overwrite existing content.
+
+   **If `related_refs` is non-empty** (ticket references found in signals, different from primary):
+   - Show: "Signals mention these other tickets: <list>"
+   - Ask: "Comment on any of these too?" Let user select which ones (multi-select).
+   - For each selected: post a shorter comment: "Related change `<name>` was archived. See <primary issue URL> for details."
+
 **Output On Success**
 
 ```
@@ -96,6 +186,7 @@ Archive a completed change in the experimental workflow.
 **Schema:** <schema-name>
 **Archived to:** openspec/changes/archive/YYYY-MM-DD-<name>/
 **Specs:** ✓ Synced to main specs
+**Ticket:** ✓ Commented on <provider> #<id>
 
 All artifacts complete. All tasks complete.
 ```
@@ -109,6 +200,7 @@ All artifacts complete. All tasks complete.
 **Schema:** <schema-name>
 **Archived to:** openspec/changes/archive/YYYY-MM-DD-<name>/
 **Specs:** No delta specs
+**Ticket:** ✓ Commented on <provider> #<id>  (or "No linked issue")
 
 All artifacts complete. All tasks complete.
 ```
@@ -122,6 +214,7 @@ All artifacts complete. All tasks complete.
 **Schema:** <schema-name>
 **Archived to:** openspec/changes/archive/YYYY-MM-DD-<name>/
 **Specs:** Sync skipped (user chose to skip)
+**Ticket:** ✓ Commented on <provider> #<id>  (or "Skipped — no linked issue" / "Skipped — no substantive changes")
 
 **Warnings:**
 - Archived with 2 incomplete artifacts
@@ -155,3 +248,8 @@ Target archive directory already exists.
 - Show clear summary of what happened
 - If sync is requested, use the Skill tool to invoke `openspec-sync-specs` (agent-driven)
 - If delta specs exist, always run the sync assessment and show the combined summary before prompting
+- Step 7 (linked issue sync) runs after the archive move — never before
+- Never auto-post to any ticket without user confirmation (show draft first)
+- Never overwrite ticket body — append-only; require explicit confirmation for body changes
+- If write to tracker fails, always print the comment text to terminal as fallback
+- Related ticket comments require per-ticket or batch confirmation — never auto-post

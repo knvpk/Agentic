@@ -133,7 +133,35 @@ If the user mentions a change or you detect one is relevant:
    - "This is a new requirement. Add it to specs?"
    - "This changes scope. Update the proposal?"
 
-4. **The user decides** - Offer and move on. Don't pressure. Don't auto-capture.
+4. **"Capture this" — post conclusion to linked ticket**
+
+   When a clear conclusion crystallises (scope decision, requirement ruled out, new requirement discovered, technical constraint confirmed), offer:
+
+   > "Want to capture this on the ticket? Type `capture` to post a note, or keep exploring."
+
+   The user must explicitly type `capture` (or say "yes, capture it", "post it", etc.). Never auto-post.
+
+   **When user confirms capture:**
+
+   a. Extract the conclusion as a concise bullet or short paragraph.
+
+   b. Check for `linked_issue` in `.openspec.yaml` of the active change:
+      - Read `openspec/changes/<name>/.openspec.yaml` for the current change
+      - If `linked_issue` is present: draft a short comment and show it for confirmation
+        ```
+        **Explore note — <change-name>**
+
+        <conclusion text>
+        ```
+      - If no `linked_issue` but an active change exists: offer to write to `openspec/changes/<name>/notes.md` instead
+      - If no active change at all: skip silently, tell the user the conclusion wasn't saved
+
+   c. Post via provider routing (same as archive step 7d — GitHub/GitLab/Jira/Plane).
+
+   d. On success: "✓ Posted to #<id>. Continuing exploration..."
+   On failure: print the text and say "⚠ Could not post — copy above to post manually."
+
+5. **The user decides** - Offer and move on. Don't pressure. Don't auto-capture.
 
 ---
 

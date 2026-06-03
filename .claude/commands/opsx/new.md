@@ -37,6 +37,32 @@ Start a new change using the experimental artifact-driven approach.
    Add `--schema <name>` only if the user requested a specific workflow.
    This creates a scaffolded change at `openspec/changes/<name>/` with the selected schema.
 
+3a. **Store linked issue and base ref (if ticket context is available)**
+
+   Check the current session for ticket context. Context is present if:
+   - This invocation came from `project-management start` (ticket id/provider/url passed in the prompt)
+   - The user mentioned a ticket reference (`#42`, `PROJ-42`, or an issue URL) in conversation
+
+   If ticket context is found, append to `.openspec.yaml`:
+   ```yaml
+   linked_issue:
+     provider: <gitlab|github|jira|plane>
+     project_ref: <org/repo or project key>
+     id: "<issue id as string>"
+     url: <full issue URL>
+   ```
+
+   Also capture the git base ref for reliable diff anchoring later:
+   ```bash
+   git rev-parse HEAD
+   ```
+   Append to `.openspec.yaml`:
+   ```yaml
+   base_ref: <sha>
+   ```
+
+   If no ticket context is present, skip this step silently (both fields are optional).
+
 4. **Show the artifact status**
    ```bash
    openspec status --change "<name>"

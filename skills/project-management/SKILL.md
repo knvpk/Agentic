@@ -28,6 +28,17 @@ compatibility: >
 
 # project-management
 
+## Pre-routing Intercepts
+
+Check these triggers **before** running Query Normalization. Route directly to the named mode — do not run intent extraction or filter grammar parsing on these inputs.
+
+| Trigger | Route |
+|---------|-------|
+| `help`, `?`, `what can you do`, `commands`, `list commands` | **help** (Variant A — general index) |
+| `help <word>` (single word after "help") | **help** (Variant B — mode detail) |
+
+---
+
 ## Shared: Query Normalization
 
 Before routing to a mode, extract **intent** and **filters** from the user's input. Use the normalized output to determine mode, sub-mode, and pre-filled filters.
@@ -64,6 +75,7 @@ Run Query Normalization first, then route:
 
 | User says | Mode |
 |-----------|------|
+| "help", "help `<mode>`", "?", "what can you do", "commands", "list commands" | **help** |
 | "init", "set up project", "configure provider", "init --probe" | **init** |
 | "update the PRD", "add to architecture", "edit database doc", "scaffold docs", "update tools" | **docs** |
 | "fill docs", "fill in docs", "populate docs", "fill in the {file}" | **docs** *(fill-intent — skip scaffold check, go to Interactive Fill Flow for existing files)* |
@@ -84,6 +96,216 @@ Run Query Normalization first, then route:
 | "standup", "daily standup", "stand up", "daily" | **standup** |
 | "backlog refine", "refine backlog", "estimate tickets", "grooming", "backlog grooming" | **backlog → refine** |
 | "bulk", "generate tickets", "create tickets from docs", "populate backlog", "generate backlog" | **bulk** |
+
+---
+
+## MODE: help
+
+> Maintenance note: when adding a new mode or sub-mode, update Variant A's command index and the corresponding Variant B block below.
+
+### Variant A — general help (no argument)
+
+Triggered by: `help`, `?`, `what can you do`, `commands`, `list commands`
+
+Output this command index:
+
+```
+project-management — available commands
+
+SETUP
+  init         Configure provider (GitHub, GitLab, Jira, Plane) and probe capabilities
+  docs         Scaffold and fill project docs (prd, architecture, database, tools…)
+
+TICKETS
+  ticket new   Create a rich ticket with BDD scenarios and use cases
+  ticket list  List / search tickets by state, assignee, label, sprint
+  ticket update Update state, labels, assignee, or sprint for a ticket
+  ticket link  Link tickets: parent/child, blocks/blocked-by, relates-to
+  bulk         Generate a full backlog from docs/ folder
+
+SPRINTS
+  sprint plan     Pick tickets for the sprint from backlog candidates
+  sprint review   What shipped this sprint (grouped by label)
+  sprint retro    Record retrospective; creates a retro issue
+  sprint close    End sprint, log velocity, clear active sprint
+  sprint milestone Create / assign / list / close release milestones
+  sprint labels   Create or list state and epic labels
+
+DAILY WORKFLOW
+  next      Algorithmic recommendation: best ticket to work on now
+  start     Load a ticket, create its branch, invoke explore mode
+  standup   Daily standup: what I did / what's next / blockers
+  status    Sprint board grouped by canonical state with health signal
+  backlog   Refine unestimated backlog tickets (story points + DoR check)
+
+Type: help <mode>  for details. Example: help sprint
+```
+
+After the index, append a status line:
+- **`.project/config.yaml` exists** → `Current: provider={provider.name} | sprint={active_sprint.name or "none"}`
+- **`.project/config.yaml` absent** → `⚠ Not initialized — run: /project-management init`
+
+No MCP calls are made by this mode.
+
+---
+
+### Variant B — mode-specific help (`help <mode>`)
+
+Extract the single word after "help". Match against the list below and output the block. No MCP calls are made.
+
+**`help init`**
+```
+init — configure the project management provider
+
+  Detects provider from git remote, probes API capabilities, writes .project/config.yaml.
+  Offers to scaffold docs/ on completion.
+
+  Flags:
+    (none)      First-time setup
+    --probe     Re-detect capabilities (use after plan changes or MCP updates)
+
+  Examples:
+    "set up project"
+    "init --probe"
+```
+
+**`help docs`**
+```
+docs — scaffold and fill project documentation
+
+  Creates docs/ files (prd.md, architecture.md, database.md, tools.md) appropriate
+  for your project type. Interactive fill-in flow asks questions and writes answers
+  to the correct sections.
+
+  Sub-flows:
+    scaffold   Create empty docs files for your project type
+    fill       Interactive Q&A to populate sections in existing docs
+    edit       Update a specific section in an existing doc
+
+  Examples:
+    "scaffold docs"
+    "fill in the PRD"
+```
+
+**`help ticket`**
+```
+ticket — create, update, link, and list tickets
+
+  Sub-modes:
+    new     Create a rich ticket with BDD scenarios, requirements, and use cases
+    update  Change state, labels, assignee, or sprint
+    link    Link two tickets: parent/child, blocks/blocked-by, relates-to
+    list    List or search tickets by state, assignee, label, sprint, or keyword
+
+  Examples:
+    "create a ticket for JWT refresh"
+    "show me @alice's blocked tickets"
+```
+
+**`help sprint`**
+```
+sprint — manage sprints, ceremonies, and milestones
+
+  Sub-modes:
+    create    Start a new sprint (label-based on GitLab CE)
+    plan      Pick tickets for the sprint from ranked backlog candidates
+    review    What shipped this sprint, grouped by label
+    retro     Record retrospective (creates a retro issue in the tracker)
+    close     End sprint, log velocity, clear active sprint from config
+    milestone Create / assign / list / close release milestones (v1.0, Beta…)
+    labels    Create or list state and epic labels
+
+  Examples:
+    "sprint plan"
+    "sprint close"
+```
+
+**`help next`**
+```
+next — recommend the best ticket to work on right now
+
+  Scores open in-sprint tickets by: WIP continuation → priority → unblocks-others
+  count → estimate size. Eliminates tickets whose blockers are not yet done.
+  Works across multiple repos when context_repos is configured.
+
+  Examples:
+    "what should I work on"
+    "next ticket"
+```
+
+**`help start`**
+```
+start — load a ticket and create its feature branch
+
+  Fetches ticket by ID or URL, enriches with project doc context, checks WIP limit,
+  transitions to in-progress, creates a branch, and opens explore mode.
+
+  Flags:
+    --no-branch   Skip branch creation; continue in exploration mode only
+
+  Examples:
+    "start TICK-42"
+    "work on #38"
+```
+
+**`help status`**
+```
+status — sprint board with health signal
+
+  Fetches all active-sprint tickets, groups by canonical state, and shows a sprint
+  health bar (% of committed points done), WIP count, and blocked ticket list.
+  Works across multiple repos when context_repos is configured.
+
+  Examples:
+    "show board"
+    "what's in flight"
+```
+
+**`help standup`**
+```
+standup — daily standup output
+
+  Produces three sections: what I did (in-review / done tickets assigned to me),
+  what I'll work on next (top scorer from the next algorithm), and blockers.
+
+  Examples:
+    "standup"
+    "daily standup"
+```
+
+**`help backlog`**
+```
+backlog — refine unestimated tickets
+
+  Walks unestimated backlog/todo tickets one at a time. Shows Definition of Ready
+  check per ticket and prompts for a story-point estimate. Saves estimates to the
+  tracker directly.
+
+  Examples:
+    "refine backlog"
+    "estimate tickets"
+```
+
+**`help bulk`**
+```
+bulk — generate a full backlog from docs/
+
+  Reads all applicable docs/ files, maps sections to typed ticket candidates
+  (feature, scaffold, migration, maintenance, spike), deduplicates against existing
+  tracker tickets, presents a manifest for human review, then creates all approved
+  tickets in one pass.
+
+  Examples:
+    "generate tickets from docs"
+    "populate backlog"
+```
+
+**Unknown mode fallback**
+
+If the word after "help" does not match any known mode name, output:
+```
+Unknown mode: <name>. Valid modes: init, docs, ticket, sprint, next, start, status, standup, backlog, bulk
+```
 
 ---
 

@@ -11,6 +11,6 @@
 - [x] Project managment skill should follow agile practises.
 - [x] Giltab mcp doesnt have update_issue tool to change the status.
 - [ ] A dedicated .env.tempalte skill. as part of engineering group. which should be gitlable.
-- [ ] Branching strategy should be part of config.yaml
+- [x] Branching strategy should be part of config.yaml
 - [ ] After ospx archive it should detect if there are any new changes did, it should comment on the gitlab issue. Also possible new changes concluded in explore session should update tickets as well.
 - [x] In `project-management` skill add `help` command.

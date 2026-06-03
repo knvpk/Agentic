@@ -19,7 +19,7 @@ services:
     # depends_on:
     #   - ollama
 
-  webui_pipelines:
+  webui-pipelines:
     image: ghcr.io/open-webui/pipelines:main
     volumes:
       - ../pipelines:/app/pipelines

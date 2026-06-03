@@ -1,6 +1,6 @@
 
 services:
-  vector_db:
+  vector-db:
     image: chromadb/chroma:1.5.9.dev48
     volumes:
       - vector_db_data:/chroma/chroma

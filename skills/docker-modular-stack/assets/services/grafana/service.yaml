@@ -21,7 +21,7 @@ services:
       - analytics_db
       - db
 
-  mcp_grafana:
+  mcp-grafana:
     image: mcp/grafana:latest
     command: ["-t=sse"]
     environment:

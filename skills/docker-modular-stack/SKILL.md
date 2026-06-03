@@ -245,6 +245,10 @@ Run this checklist against any service definition the user provides. Report each
 - [ ] Inter-service comms use Docker network service names, not `localhost`
 - [ ] CoreDNS mode: static IP assigned from correct layer range (see catalog.md)
 
+**CoreDNS networking** (check only when networking mode is CoreDNS)
+- [ ] Service names contain no underscores — underscores are not valid DNS hostname characters; use hyphens (e.g. `mission-control` not `mission_control`)
+- [ ] Authentik service (`idp-server`) includes `AUTHENTIK_LISTEN__HTTP: "0.0.0.0:80"` — without this, Authentik binds at port 9000 and all cross-service SSO URLs must include `:9000`
+
 **Volumes**
 - [ ] Named (managed) volumes used for data
 - [ ] Bind mounts used only for config files

@@ -1,5 +1,5 @@
 services:
-  mission_control:
+  mission-control:
     image: ghcr.io/builderz-labs/mission-control:latest
     volumes:
       - mission_control_data:/app/.data

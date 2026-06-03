@@ -26,9 +26,9 @@ services:
       OAUTH_PROVIDER: "auth0"
       GENERIC_CLIENT_ID: ${LITELLM_SSO_CLIENT_ID}
       GENERIC_CLIENT_SECRET: ${LITELLM_SSO_CLIENT_SECRET}
-      GENERIC_TOKEN_ENDPOINT: "http://idp_server:9000/application/o/token/"
-      GENERIC_USERINFO_ENDPOINT: "http://idp_server:9000/application/o/userinfo/"
-      GENERIC_AUTHORIZATION_ENDPOINT: "http://PLACEHOLDER_DNS_ZONE:9000/application/o/authorize/"
+      GENERIC_TOKEN_ENDPOINT: "http://idp-server/application/o/token/"
+      GENERIC_USERINFO_ENDPOINT: "http://idp-server/application/o/userinfo/"
+      GENERIC_AUTHORIZATION_ENDPOINT: "http://PLACEHOLDER_DNS_ZONE/application/o/authorize/"
       GENERIC_SCOPE: "openid profile email litellm_role"
       GENERIC_USER_ROLE_ATTRIBUTE: "litellm_role"
       AUTO_REDIRECT_UI_LOGIN_TO_SSO: "false"

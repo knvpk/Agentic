@@ -13,10 +13,10 @@
 | **valkey** | `services/valkey.yaml` | data | cache | — | — | Valkey 9, Redis-compatible; preferred over redis for new projects |
 | **minio** | `services/minio.yaml` | data | os | — | — | S3-compatible object store; pre-creates `langfuse` bucket on boot |
 | **neo4j** | `services/neo4j/` | data | graph_db | — | — | Community edition; 512M heap max |
-| **falkor_db** | `services/falkor_db/` | data | graph_db1_server + graph_db1_browser | — | — | Redis-protocol graph DB; browser UI included |
-| **chroma** | `services/chroma.yaml` | data | vector_db | — | — | ChromaDB vector store |
+| **falkor_db** | `services/falkor_db/` | data | graph-db1-server + graph-db1-browser | — | — | Redis-protocol graph DB; browser UI included |
+| **chroma** | `services/chroma.yaml` | data | vector-db | — | — | ChromaDB vector store |
 | **neo4j** (simple) | `services/neo4j.yaml` | data | graph_db | — | — | Flat single-file variant of Neo4j; use instead of `neo4j/` for minimal setup |
-| **grafana** | `services/grafana/` | observability | grafana + mcp_grafana | analytics_db, db | — | **No datasource YAMLs included** — add to `docker/grafana/config/provisioning/datasources/` per project |
+| **grafana** | `services/grafana/` | observability | grafana + mcp-grafana | analytics_db, db | — | **No datasource YAMLs included** — add to `docker/grafana/config/provisioning/datasources/` per project |
 | **tempo** | `services/tempo/` | observability | tempo | — | — | Distributed tracing backend; receives OTLP from otel-collector |
 | **otel-collector** | `services/otel-collector/` | observability | otel-collector | analytics_db | — | OTLP collector; forwards traces to ClickHouse |
 | **langfuse** | `services/langfuse.yaml` | observability | langfuse + langfuse-worker | db, analytics_db, os, cache | — | LLM tracing; contains `PLACEHOLDER_DNS_ZONE` in URLs |
@@ -24,7 +24,7 @@
 | **hyperdx** | `services/hyperdx.yaml` | observability | hyperdx | — | — | Full-stack observability UI |
 | **mailpit** | `services/mailpit.yaml` | communications | mail | — | — | Email dev/test; SMTP on 1025, UI on 8025 |
 | **mailslurper** | `services/mailslurper.yaml` | communications | mailslurper | — | — | Email dev/test alternative |
-| **authentik** | `services/authentik/` | app_dependency | idp_server + idp_worker | db, cache | — | Identity provider (SSO/OIDC); requires valkey `cache` service name |
+| **authentik** | `services/authentik/` | app_dependency | idp-server + idp-worker | db, cache | — | Identity provider (SSO/OIDC); binds at port 80 via `AUTHENTIK_LISTEN__HTTP`; requires valkey `cache` service name |
 | **oryd** | `services/oryd/` | app_dependency | oauth2 + oauth2-migrate + oauth2-consent | db | — | Ory Hydra OAuth2 + Kratos users |
 | **graphiti** | `services/graphiti/` | app_dependency | graphiti | falkor_db | — | Knowledge graph MCP; depends on FalkorDB |
 | **litellm** | `services/litellm/` | app | litellm | db | `OPENAI_API_KEY`, `APP_AWS_ACCESS_KEY_ID`, `APP_AWS_SECRET_ACCESS_KEY` | LLM proxy; contains `PLACEHOLDER_DNS_ZONE` in SSO endpoints |
@@ -34,10 +34,10 @@
 | **archon** | `services/archon/` | app | archon | — | `CLAUDE_CODE_OAUTH_TOKEN` | AI agent runner; custom Dockerfile |
 | **paperclip** | `services/paperclip/` | app | paperclip | — | `GITLAB_URL`, `GITLAB_TOKEN` | File management; custom Dockerfile |
 | **tensorzero** | `services/tensorzero/` | app | tensorzero | — | `OPENAI_API_KEY`, `APP_AWS_ACCESS_KEY_ID`, `APP_AWS_SECRET_ACCESS_KEY` | LLM gateway with observability |
-| **mission_control** | `services/mission_control/` | app | mission_control | — | — | Control plane UI |
-| **prefect** | `services/prefect/` | app | prefect | — | — | Data workflow orchestration |
+| **mission_control** | `services/mission_control/` | app | mission-control | — | — | Control plane UI |
+| **prefect** | `services/prefect/` | app | prefect-server + prefect-services + prefect-worker | — | — | Data workflow orchestration |
 | **ollama** | `services/ollama.yaml` | app | ollama | — | — | Local LLM model server; sends OTLP traces to otel-collector if selected |
-| **webui** | `services/webui.yaml` | app | webui + webui_pipelines + mcpo | ollama (optional) | `GENERIC_API_KEY` | Open WebUI with pipelines and MCP proxy; helper containers in same file |
+| **webui** | `services/webui.yaml` | app | webui + webui-pipelines + mcpo | ollama (optional) | `GENERIC_API_KEY` | Open WebUI with pipelines and MCP proxy; helper containers in same file |
 | **inspector** | `services/inspector.yaml` | app | inspector | — | — | MCP Inspector UI |
 
 ---
@@ -125,3 +125,4 @@ datasources:
     secureJsonData:
       password: ${DB_PASSWORD}
 ```
+

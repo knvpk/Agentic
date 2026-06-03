@@ -425,7 +425,7 @@ When a `url` value is needed for MCP calls, normalize it to `owner/repo`:
 For each entry in the resolved list:
 
 1. **Path exists on disk and has a `docs/` subfolder** → read all `.md` files from `<path>/docs/`
-2. **Path missing or no `docs/` on disk, and `url` is present** → normalize URL to `owner/repo`; use GitHub MCP `get_file_contents` to fetch each `.md` file under `docs/`
+2. **Path missing or no `docs/` on disk, and `url` is present** → normalize URL to `owner/repo`; use GitHub MCP `get_file_contents` on the `docs/` path to retrieve the directory listing, then fetch each `.md` file individually
 3. **Path missing and no `url`** → emit `⚠ <folder-name>: path missing, no url — skipped` and continue
 
 Where `<folder-name>` is the last path segment of `path` (e.g. `../backend` → `backend`).
@@ -881,14 +881,15 @@ Check if `.gitmodules` exists in the repo root.
 
 **If `.gitmodules` is present**:
 1. Parse every submodule block to extract `path` and `url`.
-2. Present the list and ask:
+2. Filter out any submodule whose `path` is already present in the existing `docs_sources` array — only prompt for new ones. If all submodules are already configured, skip the prompt entirely.
+3. Present the remaining list and ask:
    ```
    Found submodules: [vendor/backend, vendor/design-system]
    Include their docs/ as doc sources? [all / select / none]
    ```
-3. **all** → write all submodules to `docs_sources` in `.project/config.yaml`, each as `{path, url}` using the URL from `.gitmodules`
-4. **select** → prompt `[y/n]` for each submodule; write confirmed entries only
-5. **none** → skip; user can add `docs_sources` manually later
+4. **all** → write all submodules to `docs_sources` in `.project/config.yaml`, each as `{path, url}` using the URL from `.gitmodules`
+5. **select** → prompt `[y/n]` for each submodule; write confirmed entries only
+6. **none** → skip; user can add `docs_sources` manually later
 
 Only write entries for submodules the user confirmed. Do not overwrite any existing `docs_sources` entries.
 
@@ -1076,6 +1077,11 @@ Created: {file list}. Fill them in now? [y/n]
 Used by Step 2b (post-scaffold) and by fill-intent routing phrases ("fill docs", "fill in docs", "populate docs", "fill in the {file}").
 
 **When invoked via routing phrase** (not post-scaffold): read which files in `docs/` currently exist. Ask only questions whose target sections live in those files. Do not create new files.
+
+Run Resolve Docs Sources. If any sources resolved, display:
+```
+Doc sources: backend (disk), design-system (remote)
+```
 
 At any question, the user may type `done` to skip all remaining questions and go directly to Step E (post-fill summary).
 

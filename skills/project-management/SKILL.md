@@ -388,12 +388,51 @@ When generating ticket context, follow this chain — stop at first hit, only in
 3. docs/database.md       → find entities/tables matching the ticket topic
    docs/local-storage.md  → use instead of database.md when project_type: mobile
 4. docs/tools.md          → find tools relevant to the ticket topic
-5. local repo files       → search src/, lib/, config files by filename + content proximity
-6. context_repos          → if set in .project/config.yaml, search those repo paths
-7. warn                   → "No relevant context found — Context section may be incomplete"
+5. docs_sources docs/     → run Resolve Docs Sources; for each resolved source, find
+                             sections matching the ticket topic by keyword;
+                             label each snippet [from: <folder-name>]
+6. local repo files       → search src/, lib/, config files by filename + content proximity
+7. context_repos          → if set in .project/config.yaml, search those repo paths
+8. warn                   → "No relevant context found — Context section may be incomplete"
 ```
 
 Never dump an entire docs file. Only include sections/paragraphs where the topic appears.
+
+---
+
+## Shared: Resolve Docs Sources
+
+Call this procedure whenever a mode needs to read docs from sibling repos (ticket context, bulk generation, docs mode display).
+
+### Step 1 — Collect entries
+
+1. Read `docs_sources` from `.project/config.yaml` (treat as empty array if absent).
+2. Parse `.gitmodules` from the repo root if it exists. For each submodule block, extract `path` and `url`. These become auto-discovered entries.
+3. Merge: if an auto-discovered entry's `path` already appears in `docs_sources` (with or without `exclude`), skip the auto-discovered entry — the explicit entry wins entirely.
+4. Filter: remove any entry where `exclude: true`.
+
+Result: a list of `{path, url?}` objects to read from.
+
+### Step 2 — URL normalization
+
+When a `url` value is needed for MCP calls, normalize it to `owner/repo`:
+- `https://github.com/org/repo` → `org/repo`
+- `https://github.com/org/repo.git` → `org/repo`
+- `git@github.com:org/repo.git` → `org/repo`
+
+### Step 3 — Read each source
+
+For each entry in the resolved list:
+
+1. **Path exists on disk and has a `docs/` subfolder** → read all `.md` files from `<path>/docs/`
+2. **Path missing or no `docs/` on disk, and `url` is present** → normalize URL to `owner/repo`; use GitHub MCP `get_file_contents` to fetch each `.md` file under `docs/`
+3. **Path missing and no `url`** → emit `⚠ <folder-name>: path missing, no url — skipped` and continue
+
+Where `<folder-name>` is the last path segment of `path` (e.g. `../backend` → `backend`).
+
+### Step 4 — Label all content
+
+Prefix every snippet retrieved from a docs source with `[from: <folder-name>]` so its origin is clear in ticket context and bulk manifests.
 
 ---
 
@@ -773,6 +812,22 @@ Write `.project/config.yaml` conforming to `references/config.schema.json`. Begi
 
 All valid fields and their constraints are defined in `references/config.schema.json`. Refer to it as the authoritative field list.
 
+**`docs_sources`** — optional array of sibling repo doc sources. Each entry is an object:
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | Relative path to the sibling repo (e.g. `../backend`) |
+| `url` | string | no | Git remote or GitHub URL (e.g. `https://github.com/org/repo`). Used as fallback when `path` is not present on disk. |
+| `exclude` | boolean | no | Set `true` to suppress a path auto-discovered from `.gitmodules` |
+
+```yaml
+docs_sources:
+  - path: ../backend
+    url: https://github.com/knvpk/backend
+  - path: vendor/ui-lib
+    exclude: true   # auto-discovered submodule — suppress it
+```
+
 ### Step 6 — Jira extra: board selection
 
 If provider is jira and `sprints: true`, call `list_boards`, present a selection list, store `board_id` in config.
@@ -818,7 +873,26 @@ For each capability that is false, print one line:
 ℹ  GitLab CE — sprints use scoped labels (sprint::*). Convention: {sprint_convention}. Metadata: {pm_meta_project}.
 ```
 
-### Step 9 — Offer docs scaffold
+### Step 9 — Detect sibling repo doc sources
+
+Check if `.gitmodules` exists in the repo root.
+
+**If `.gitmodules` is absent** → skip this step.
+
+**If `.gitmodules` is present**:
+1. Parse every submodule block to extract `path` and `url`.
+2. Present the list and ask:
+   ```
+   Found submodules: [vendor/backend, vendor/design-system]
+   Include their docs/ as doc sources? [all / select / none]
+   ```
+3. **all** → write all submodules to `docs_sources` in `.project/config.yaml`, each as `{path, url}` using the URL from `.gitmodules`
+4. **select** → prompt `[y/n]` for each submodule; write confirmed entries only
+5. **none** → skip; user can add `docs_sources` manually later
+
+Only write entries for submodules the user confirmed. Do not overwrite any existing `docs_sources` entries.
+
+### Step 10 — Offer docs scaffold
 
 After all steps complete, ask:
 ```
@@ -836,6 +910,12 @@ Scaffold project docs now? [y/n]
 
 If `docs/` directory does not exist, create it and scaffold the type-appropriate files (see Step 2).
 If it exists, skip scaffolding and go to Step 3.
+
+Run Resolve Docs Sources. If any sources resolved, display:
+```
+Doc sources: backend (disk), design-system (remote)
+```
+Use `(disk)` when the path exists locally, `(remote)` when the path was missing and MCP fallback will be used. This is informational only — the skill never scaffolds or writes files to any docs_sources path.
 
 ### Step 2 — Scaffold files (first time only, type-conditional)
 
@@ -1163,6 +1243,8 @@ Read `project_type` from `.project/config.yaml`. Read every doc file that exists
 | generic | prd.md, architecture.md, database.md, tools.md |
 
 Collect all file paths that were successfully read. These become the `source_files` list shown in the manifest header.
+
+**Cross-repo docs**: run Resolve Docs Sources. For each resolved source, read all `.md` files from its `docs/`. Append them to the file set used for section mapping in Step 2, labelling each section `[from: <folder-name>]`. Append resolved source paths to `source_files` (e.g. `backend/docs/architecture.md [from: backend]`).
 
 ### Step 2 — Map doc sections to ticket candidates
 

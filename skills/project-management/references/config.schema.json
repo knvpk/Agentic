@@ -140,6 +140,29 @@
       "items": { "type": "string" },
       "description": "Sibling repo paths for cross-repo context fallback and unified sprint views. Each must have its own .project/config.yaml."
     },
+    "docs_sources": {
+      "type": "array",
+      "description": "Sibling repo doc sources. Each entry points to a repo whose docs/ folder the skill should consult for ticket context, bulk generation, and docs mode. Git submodules with a docs/ folder are also auto-discovered from .gitmodules and merged with this list.",
+      "items": {
+        "type": "object",
+        "required": ["path"],
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Relative path to the sibling repo, e.g. ../backend or vendor/design-system"
+          },
+          "url": {
+            "type": "string",
+            "description": "Git remote or GitHub URL, e.g. https://github.com/org/repo. Used as fallback when path is not present on disk."
+          },
+          "exclude": {
+            "type": "boolean",
+            "description": "Set true to suppress this path from doc resolution, e.g. to silence an auto-discovered submodule."
+          }
+        }
+      }
+    },
     "branching": {
       "description": "Branching strategy. When absent, start mode falls back to git topology auto-detection.",
       "oneOf": [

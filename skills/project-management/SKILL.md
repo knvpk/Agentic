@@ -2323,7 +2323,19 @@ Ticket context for linked issue tracking:
 Let's think through: requirements, ambiguities, edge cases, and which parts of the codebase are likely involved.
 ```
 
-This ticket context block is passed so that if `opsx:new` is invoked during the explore session, it can write `linked_issue` to `.openspec.yaml` automatically.
+After the explore session ends (or when the user moves to implementation), check if a new change was created under `openspec/changes/`. If a new `.openspec.yaml` exists without a `linked_issue` block, write it now:
+
+```yaml
+linked_issue:
+  provider: <provider from config>
+  project_ref: <project_ref from config>
+  id: "<ticket id>"
+  url: <ticket URL>
+base_ref: <output of: git rev-parse HEAD>
+```
+
+Also scan `system-reminder` for `archive-ticket-sync`. If present and a `linked_issue` was written, note to the user:
+> "Ticket context stored. After implementation, run `/archive-ticket-sync` to post a summary to #<id> when you archive."
 
 #### Step 7b — Fallback if opsx:explore not loaded
 

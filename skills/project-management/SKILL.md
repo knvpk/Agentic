@@ -61,6 +61,7 @@ Run Query Normalization first, then route:
 |-----------|------|
 | "init", "set up project", "configure provider", "init --probe" | **init** |
 | "update the PRD", "add to architecture", "edit database doc", "scaffold docs", "update tools" | **docs** |
+| "fill docs", "fill in docs", "populate docs", "fill in the {file}" | **docs** *(fill-intent — skip scaffold check, go to Interactive Fill Flow for existing files)* |
 | "create a ticket", "new issue", "add task" | **ticket → new** |
 | "update TICK-42", "move TICK-42 to in-review", "close TICK-5" | **ticket → update** |
 | "link TICK-42 to TICK-10", "blocks", "relates to" | **ticket → link** |
@@ -696,9 +697,100 @@ Create each file only if it doesn't already exist:
 ## Linting & Formatting
 ```
 
+### Step 2b — Offer interactive fill (after scaffold)
+
+After Step 2 writes any new files, output:
+```
+Created: {file list}. Fill them in now? [y/n]
+```
+
+- **y** → immediately run the **Interactive Fill Flow** below
+- **n** → exit docs mode cleanly; fill can be invoked any time via fill-intent routing phrases
+
+---
+
+### Interactive Fill Flow
+
+Used by Step 2b (post-scaffold) and by fill-intent routing phrases ("fill docs", "fill in docs", "populate docs", "fill in the {file}").
+
+**When invoked via routing phrase** (not post-scaffold): read which files in `docs/` currently exist. Ask only questions whose target sections live in those files. Do not create new files.
+
+At any question, the user may type `done` to skip all remaining questions and go directly to Step E (post-fill summary).
+
+#### Step A — Core questions (all project types)
+
+Ask each question in order. Show target sections after the question label so the user knows what to include.
+
+| # | Question | Target sections |
+|---|----------|-----------------|
+| 1 | "What does this project do? (2-3 sentences)" | `prd.md §Overview` |
+| 2 | "What are the main features? (one per line — I'll format as bullet points)" | `prd.md §Features` |
+| 3 | "What is the tech stack? Include language, framework, testing framework, and linter/formatter." | `tools.md §Language`, `tools.md §Framework`, `tools.md §Testing`, `tools.md §Linting & Formatting` |
+| 4 | "What are the main components or services?" | `architecture.md §Components` |
+| 5 | "How does data flow through the system? (e.g. client → API → DB)" | `architecture.md §Data Flow` |
+
+#### Step B — Conditional questions (by project_type)
+
+Read `project_type` from `.project/config.yaml` (treat as `generic` if absent), then ask only the matching question(s):
+
+| project_type | Question | Target sections |
+|---|---|---|
+| web, api, generic | "What database(s) do you use, and what are the main entities/tables?" | `database.md §Overview`, `database.md §Entities` |
+| api | "How is the API authenticated and versioned? (e.g. Bearer token, URI versioning)" | `api.md §Authentication`, `api.md §Versioning Strategy` |
+| microservices | "List your services with their responsibilities (name: description, one per line)" | `services.md §Service Registry` |
+| mobile | "What local storage engine do you use, and how does data sync with the backend?" | `local-storage.md §Storage Engine`, `local-storage.md §Sync Strategy` |
+
+#### Step C — Optional questions
+
+Each is prefixed with `(optional — press Enter to skip)`. If the user presses Enter with no input, skip to the next question.
+
+| Question | Target sections |
+|---|---|
+| "(optional — press Enter to skip) Any non-functional requirements? (performance, security, compliance)" | `prd.md §Non-Functional Requirements` |
+| "(optional — press Enter to skip) What CI/CD, command runner, and dev environment do you use?" | `tools.md §CI/CD`, `tools.md §Command Runner`, `tools.md §Dev Environment` |
+| "(optional — press Enter to skip) Any Docker app dependencies? (e.g. postgres, redis, valkey)" | `tools.md §App Dependencies (Docker)` |
+| "(optional — press Enter to skip) Any key architecture decisions already made?" | `architecture.md §Architecture Decisions` |
+
+#### Step D — Write answers to target sections
+
+For each question that received an answer:
+
+1. **Parse the answer** to extract content for each target section:
+   - **Tech stack answer** (Q3): split by comma or newline; assign each part to the most appropriate section (language token → `§Language`, framework token → `§Framework`, test-framework token → `§Testing`, linter/formatter token → `§Linting & Formatting`)
+   - **Features answer** (Q2): format each line as a `- item` bullet
+   - **Services answer** (microservices Q): format as table rows added to the `§Service Registry` table
+   - **CI/CD + tools answer** (optional Q2): split by comma or newline; assign each part to `§CI/CD`, `§Command Runner`, or `§Dev Environment` based on keywords
+   - **All other answers**: write as prose
+
+2. **Apply append rule** — for each target (file, section):
+   - Section body is **empty or whitespace-only** → write content directly
+   - Section body has **non-whitespace content** → append `\n\n---\n\n{new content}` after the existing content; do not modify anything before the separator
+
+3. **Docker hook** — after writing to `tools.md §App Dependencies (Docker)`, run the docker-modular-stack catalog check (Step 4 logic).
+
+#### Step E — Post-fill summary
+
+After all questions are processed, output a summary grouped by file listing only sections that were actually written:
+
+```
+✓ docs/prd.md          — Overview, Features
+✓ docs/architecture.md — Components, Data Flow
+✓ docs/tools.md        — Language, Framework, Testing, CI/CD
+✓ docs/database.md     — Overview, Entities
+```
+
+Omit any file where no sections were written. Omit skipped or unanswered questions from the list.
+
+---
+
 ### Step 3 — Edit the relevant section
 
-Identify which file and section the user wants to update. Edit that section only; do not touch other sections.
+Identify which file and section the user wants to update.
+
+**Empty section detection**: Before editing, check whether the target section's body — the text between its `## Header` line and the next `##` heading (or end of file) — is empty or contains only whitespace.
+
+- **If empty** → retrieve the targeted question from the fill flow question map (Steps A–C of the Interactive Fill Flow above) for that (file, section) pair and ask it. Write the answer using the append rule (Step D). This prevents passive waiting when the user targets a blank section.
+- **If non-empty** → edit that section using the user's stated changes, using the append rule. Do not ask a fill question. Do not touch other sections.
 
 ### Step 4 — docker-modular-stack suggestion
 

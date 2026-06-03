@@ -178,6 +178,10 @@
     "pm_meta_project": {
       "type": "string",
       "description": "GitLab project path holding sprint metadata issues, e.g. mycompany/pm-meta. Required when provider.name == gitlab."
+    },
+    "gitlab_project_id": {
+      "type": "integer",
+      "description": "Numeric GitLab project ID for the main project (from get_project response). Used by the REST write fallback when mcp__gitlab__update_issue is unavailable. Optional — fetched lazily on first write if absent."
     }
   },
 

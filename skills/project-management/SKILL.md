@@ -103,6 +103,47 @@ Always check `capabilities` in `.project/config.yaml` before using native API. I
 
 ---
 
+## Shared: GitLab Write Path Resolution
+
+For any operation that mutates an existing GitLab issue (state change, label add/remove, sprint label, milestone assign), use this resolution procedure instead of calling `mcp__gitlab__update_issue` directly.
+
+**Step 1 — Lazy project ID fetch (if needed)**
+
+If `gitlab_project_id` is absent from `.project/config.yaml` and the write requires REST fallback:
+- Parse repo name from git remote; construct `{gitlab_group}/{repo_name}`
+- Call `mcp__gitlab__get_project` with the full path; store the numeric `id` as `gitlab_project_id` in config
+
+**Step 2 — Resolve write path (in order)**
+
+1. `ToolSearch("mcp__gitlab__update_issue")` → if tool found, **use MCP path** (no notice needed)
+2. `which glab` exits 0 → **use glab CLI path**; emit: `ℹ Using glab CLI for GitLab write (MCP update_issue not available)`
+3. `GITLAB_TOKEN` is set → **use REST API path**; emit: `ℹ Using REST API for GitLab write (MCP update_issue not available)`
+4. All paths unavailable → **halt with error**:
+   ```
+   ✗ Cannot write to GitLab issue — no write path available.
+   Enable one of:
+     1. MCP:  mcp__gitlab__update_issue must be discoverable (check GitLab MCP server version)
+     2. CLI:  brew install glab  (or https://gitlab.com/gitlab-org/cli)
+     3. REST: set GITLAB_TOKEN env var (api scope)
+   ```
+
+**Step 3 — Label-delta helper (for label-based writes)**
+
+When the write involves label changes (state transitions, sprint assignment):
+1. Call `mcp__gitlab__get_issue` to fetch the issue's current labels
+2. Identify the state label to remove: any label whose value matches a `state_mapping[*].label` entry in `providers.json`
+3. Compute `add_labels` and `remove_labels` as the delta; preserve all other labels
+
+Then dispatch via the resolved path:
+
+| Path | State change | Label add/remove |
+|------|-------------|-----------------|
+| MCP  | `mcp__gitlab__update_issue` with `state_event: close\|reopen` + `add_labels` + `remove_labels` | same tool |
+| glab | `glab issue close/reopen` for state; `glab issue update --add-label X --remove-label Y` for labels | separate calls |
+| REST | `curl -X PUT .../issues/{iid} -d "state_event=close&add_labels=X&remove_labels=Y"` | same call |
+
+---
+
 ## Shared: Context Fallback Chain
 
 When generating ticket context, follow this chain — stop at first hit, only include **relevant** pieces:
@@ -436,6 +477,14 @@ Which sprint naming convention?
 ```
 Store choice as `sprint_convention: sequential | year-week | year-month-week | quarterly`.
 Output: `⚠ Convention cannot be changed after the first sprint is created without relabelling existing sprints.`
+
+**Project ID capture (all GitLab editions)**
+
+Parse the repo name from the git remote (segment after the last `/` in the path, minus `.git` suffix). Construct full project path: `{gitlab_group}/{repo_name}`.
+
+Call `mcp__gitlab__get_project` with the full project path:
+- 200 → read the numeric `id` field; store `gitlab_project_id: <id>` in `.project/config.yaml`
+- Error → skip silently; `gitlab_project_id` will be fetched lazily on first write operation
 
 **pm-meta project setup (CE only)**
 
@@ -912,7 +961,7 @@ After all create calls complete:
 Add all N created tickets to Sprint {name}? [y/n]
 ```
 On `y`: for each successfully created ticket —
-- **GitLab CE (`sprint_proxy == "label"`)**: call `mcp__gitlab__update_issue` to append `active_sprint.label_name` to the issue's labels
+- **GitLab CE (`sprint_proxy == "label"`)**: use **Shared: GitLab Write Path Resolution** to add `active_sprint.label_name` to the issue's labels
 - **All other providers**: call the sprint assignment MCP tool with the sprint ID
 
 **Epic label offer** (only if manifest had ≥2 distinct epic groups):
@@ -1030,7 +1079,9 @@ Validate canonical state (default: `backlog`). Resolve MCP tool from `tool_contr
 
 Ask which field(s) to update: title, description, state, labels, assignee, sprint.
 
-For **state changes**: validate against canonical machine → translate to provider state via `state_mapping` → call `update_ticket`. For `blocked`: prompt for reason + optional blocking ticket ref.
+For **state changes**: validate against canonical machine → translate to provider state via `state_mapping`.
+- **GitHub, Jira, Plane**: call `update_ticket` directly.
+- **GitLab**: use **Shared: GitLab Write Path Resolution** + label-delta helper to apply the transition. For `blocked`: prompt for reason + optional blocking ticket ref before calling the resolved write path.
 
 ---
 
@@ -1154,9 +1205,9 @@ Output: `✓ Sprint {label_value} created ({start} – {end})`
 
 Read `sprint_proxy` from config.
 
-**GitLab CE (`sprint_proxy == "label"`)**: apply or remove the sprint scoped label on the issue:
-- **add**: call `mcp__gitlab__update_issue` with the current `active_sprint.label_name` appended to the issue's existing labels
-- **remove**: call `mcp__gitlab__update_issue` with `active_sprint.label_name` removed from the issue's label list
+**GitLab CE (`sprint_proxy == "label"`)**: apply or remove the sprint scoped label on the issue using **Shared: GitLab Write Path Resolution**:
+- **add**: resolve the write path, then apply `add_labels: active_sprint.label_name` (fetch current labels first to avoid overwriting others)
+- **remove**: resolve the write path, then apply `remove_labels: active_sprint.label_name`
 
 **All other providers**: resolve sprint ID from `active_sprint.id` in config. Call `add_issue_to_sprint` / remove equivalent.
 
@@ -1186,8 +1237,9 @@ Read `capabilities.milestones` from config:
 - `false` (Plane) → activate label fallback: create label `milestone:{slug}`, notify user
 
 **assign** — attach a ticket to a milestone.
-- Native: call `milestone_contracts.assign` (update issue with milestone field / fixVersions)
-- Fallback: add label `milestone:{slug}` to the ticket
+- **GitHub, Jira, Plane**: call `milestone_contracts.assign` (update issue with milestone field / fixVersions)
+- **GitLab**: use **Shared: GitLab Write Path Resolution** to set the `milestone_id` field on the issue
+- Fallback (Plane, unsupported milestone): add label `milestone:{slug}` to the ticket
 
 **list** — call `milestone_contracts.list`. Display name, due date, open/closed ticket counts.
 For Plane fallback: search issues by `milestone:*` label prefix.

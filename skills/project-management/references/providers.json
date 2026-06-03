@@ -183,6 +183,28 @@
           "label_format": "relates:#{issue_id}"
         }
       },
+      "write_fallbacks": [
+        {
+          "type": "mcp",
+          "tool": "update_issue",
+          "description": "Primary path — use when mcp__gitlab__update_issue is discoverable via ToolSearch"
+        },
+        {
+          "type": "cli",
+          "cmd": "glab issue update {iid} --project {project_path} --add-label \"{add_labels}\" --remove-label \"{remove_labels}\"",
+          "state_close_cmd": "glab issue close {iid} --project {project_path}",
+          "state_reopen_cmd": "glab issue reopen {iid} --project {project_path}",
+          "description": "Fallback — use when MCP tool absent and glab is on PATH (which glab)"
+        },
+        {
+          "type": "rest",
+          "endpoint": "PUT /api/v4/projects/{gitlab_project_id}/issues/{iid}",
+          "base_url_env": "GITLAB_URL",
+          "base_url_default": "https://gitlab.com",
+          "auth_header": "PRIVATE-TOKEN: $GITLAB_TOKEN",
+          "description": "Last resort — always available when GITLAB_TOKEN is set"
+        }
+      ],
       "gitlab_extras": {
         "edition_probe": {
           "tool": "list_iterations",

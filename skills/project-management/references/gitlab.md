@@ -76,9 +76,50 @@ EE native:
 
 Label `epic:{slug}` applied to all child issues. Epic "title" lives in a label description.
 
+## Write Fallback Chain
+
+The GitLab MCP server does not expose `update_issue`. All writes to existing issues (state transitions, label changes, sprint and milestone assignment) use this fallback chain, tried in order:
+
+| Priority | Path | Trigger |
+|----------|------|---------|
+| 1 | MCP `update_issue` | Tool is discoverable via ToolSearch |
+| 2 | `glab` CLI | `which glab` exits 0 |
+| 3 | GitLab REST API (curl) | `GITLAB_TOKEN` is set |
+
+When falling back, the skill emits a one-line notice:
+```
+ℹ Using glab CLI for GitLab write (MCP update_issue not available)
+ℹ Using REST API for GitLab write (MCP update_issue not available)
+```
+
+If all three paths are unavailable, the skill halts with instructions for enabling one.
+
+### glab CLI (optional dependency)
+
+`glab` is not required but enables the CLI fallback path:
+
+```bash
+# macOS
+brew install glab
+
+# Linux / other
+# https://gitlab.com/gitlab-org/cli#installation
+```
+
+### REST API fallback
+
+Requires `GITLAB_TOKEN` with `api` scope. The skill reads `GITLAB_URL` for self-hosted instances:
+
+```bash
+export GITLAB_TOKEN=glpat-xxxx          # always required
+export GITLAB_URL=https://git.company.com   # self-hosted only; defaults to https://gitlab.com
+```
+
+The numeric project ID (`gitlab_project_id`) is captured at init and stored in `.project/config.yaml`. If absent, it is fetched lazily on the first write.
+
 ## Setup Checklist
 
 1. Add GitLab MCP server to Claude Code
 2. Set `GITLAB_TOKEN` with `api` scope
 3. Run `/project-management init`
-4. If self-hosted, set `ISSUE_EXPLORE_HOSTS` or configure base URL
+4. If self-hosted, set `GITLAB_URL` env var and configure base URL in MCP setup

@@ -182,6 +182,43 @@
     "gitlab_project_id": {
       "type": "integer",
       "description": "Numeric GitLab project ID for the main project (from get_project response). Used by the REST write fallback when mcp__gitlab__update_issue is unavailable. Optional — fetched lazily on first write if absent."
+    },
+    "wip_limit": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Maximum number of tickets allowed in in-progress state simultaneously. When set, the skill warns before transitioning a ticket to in-progress if the limit is at or exceeded."
+    },
+    "definition_of_done": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["has_bdd", "has_assignee"]
+      },
+      "description": "Criteria checked before a ticket can transition to done. has_bdd: description must contain a '## Scenarios' section. has_assignee: ticket must have at least one assignee."
+    },
+    "velocity_log": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["sprint", "points_committed", "points_completed"],
+        "additionalProperties": false,
+        "properties": {
+          "sprint": {
+            "type": "string",
+            "description": "Sprint identifier, e.g. sprint::2025-W23 or Sprint 4"
+          },
+          "points_committed": {
+            "type": ["number", "null"],
+            "description": "Story points committed at sprint start. Null when no capacity was set."
+          },
+          "points_completed": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Story points completed (sum of estimates on done tickets) at sprint close."
+          }
+        }
+      },
+      "description": "Append-only historical record of story points committed vs completed per sprint, written by sprint close."
     }
   },
 

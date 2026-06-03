@@ -3,7 +3,7 @@ name: project-management
 description: >
   Provider-agnostic project management skill. Manages local project docs (docs/prd.md,
   docs/architecture.md, docs/database.md, docs/tools.md) and connects to any supported
-  issue tracker (GitHub, GitLab, Jira, Plane) via MCP. Eight modes: init (configure
+  issue tracker (GitHub, GitLab, Jira, Plane) via MCP. Ten modes: init (configure
   provider, probe plan capabilities), docs (scaffold and edit project docs; suggests
   docker-modular-stack for Docker dependencies), bulk (generate a full backlog from docs/
   — reads all docs files, produces typed dependency-ordered ticket manifest, deduplicates
@@ -11,11 +11,16 @@ description: >
   opsx-ready ticket briefs with requirements, BDD scenarios, use cases; CRUD; all
   relationship types; canonical lifecycle; intelligent scope-width detection proposes
   breakdown into multiple tickets when input covers broad scope), sprint (manage
-  sprints/milestones/cycles and labels), next (algorithmic daily ticket recommendation
-  from dependency graph and priority), start (fetch a specific ticket by ID, enrich with
-  project doc context, transition state, create branch, invoke opsx:explore), status
-  (sprint board grouped by canonical state). Context for tickets is relevance-filtered
-  from docs and falls back to local repo files or configured sibling repos.
+  sprints/milestones/cycles and labels; agile ceremonies: plan, review, retro, close),
+  next (algorithmic daily ticket recommendation from dependency graph and priority),
+  start (fetch a specific ticket by ID, enrich with project doc context, transition state
+  with WIP limit check, create branch, invoke opsx:explore), status (sprint board with
+  health signal and burndown grouped by canonical state), standup (daily standup: what I
+  did / what's next / blockers), backlog (refine unestimated tickets with DoR check and
+  story-point prompts). Quality gates: Definition of Done enforcement on ticket close,
+  WIP limit enforcement on in-progress transitions. Context for tickets is
+  relevance-filtered from docs and falls back to local repo files or configured sibling
+  repos.
 compatibility: >
   Requires one MCP server configured: mcp__github__, mcp__gitlab__, mcp__jira__, or
   mcp__plane__. Run /project-management init before first use.
@@ -68,10 +73,16 @@ Run Query Normalization first, then route:
 | "list tickets", "show tickets", "find tickets about auth" | **ticket → list** |
 | "show me @alice's tickets", "what's blocked", "search for login tickets" | **ticket → list** |
 | "new sprint", "start sprint", "add to sprint", "remove from sprint", "create label", "sprint status" | **sprint** |
+| "sprint plan", "plan sprint", "sprint planning" | **sprint → plan** |
+| "sprint review", "review sprint", "what shipped" | **sprint → review** |
+| "sprint retro", "retrospective", "retro" | **sprint → retro** |
+| "sprint close", "close sprint", "end sprint", "finish sprint" | **sprint → close** |
 | "create milestone", "new milestone", "release milestone", "assign milestone", "list milestones", "close milestone" | **sprint → milestone** |
 | "what should I work on", "next ticket", "what's next", "suggest a task" | **next** |
 | "start TICK-42", "work on TICK-42", "begin TICK-42", "let's work on #42", "start {any ticket id or URL}" | **start** |
 | "show board", "sprint board", "show progress", "what's in flight" | **status** |
+| "standup", "daily standup", "stand up", "daily" | **standup** |
+| "backlog refine", "refine backlog", "estimate tickets", "grooming", "backlog grooming" | **backlog → refine** |
 | "bulk", "generate tickets", "create tickets from docs", "populate backlog", "generate backlog" | **bulk** |
 
 ---
@@ -861,6 +872,58 @@ If any match found, output:
 
 ---
 
+## MODE: backlog
+
+### Sub-mode: backlog refine
+
+Walk unestimated backlog/todo tickets one at a time to add story-point estimates and check Definition of Ready.
+
+**Step 1 — Fetch unestimated tickets**
+
+Fetch all tickets in `backlog` or `todo` state. Filter to those with no story-point estimate (null, empty, or zero). Sort by priority (high → medium → low → unset). If none found:
+```
+All backlog tickets are estimated — nothing to refine.
+```
+
+**Step 2 — Walk tickets**
+
+For each ticket, display context then prompt for estimate:
+
+```
+────────────────────────────────────────────
+[1/5] TICK-55  (high)
+────────────────────────────────────────────
+{ticket description, truncated to 200 chars}…
+Labels: backend, auth
+Blocks: TICK-60
+
+⚠ Not ready: no description    ← only if DoR fails
+
+Estimate in story points (or "s" to skip):
+> _
+```
+
+DoR check per ticket:
+- `has_description`: ticket description is non-empty
+- `has_labels`: ticket has at least one label
+
+Show `⚠ Not ready: {failing criteria}` only when DoR fails. The estimate prompt always appears regardless of DoR status.
+
+**Step 3 — Save estimate**
+
+On a numeric entry: call `update_ticket` with the estimate field value. On `s` or `skip`: record as skipped, do not call the provider.
+
+After saving, advance to the next unestimated ticket automatically.
+
+**Step 4 — Session summary**
+
+After all tickets are presented:
+```
+Refined: 3 estimated, 1 skipped, 0 remaining.
+```
+
+---
+
 ## MODE: bulk
 
 Generate a full backlog from the project's `docs/` folder. Reads all applicable doc files, produces a typed dependency-ordered manifest of ticket candidates, deduplicates against existing tracker tickets, then creates all approved tickets in one pass.
@@ -1080,6 +1143,39 @@ Validate canonical state (default: `backlog`). Resolve MCP tool from `tool_contr
 Ask which field(s) to update: title, description, state, labels, assignee, sprint.
 
 For **state changes**: validate against canonical machine → translate to provider state via `state_mapping`.
+
+#### Shared: DoD Gate (→ done transitions)
+
+Run this gate **after** state machine validation and **before** the provider call, only when transitioning to `done`.
+
+1. Read `definition_of_done` from `.project/config.yaml`. If absent or empty — skip gate entirely.
+2. For each criterion, evaluate:
+   - `has_bdd`: ticket description contains at least one `## Scenarios` section (case-insensitive match on `## scenarios` or `## Scenarios`).
+   - `has_assignee`: ticket has at least one assignee.
+3. If all criteria pass — proceed silently.
+4. If any criterion fails AND `--force` flag was NOT passed:
+   ```
+   ⚠ DoD unmet:
+     - has_assignee: no assignee set
+   Close anyway? [y/n]
+   ```
+   On `n` → output `Transition cancelled` and stop. On `y` → proceed with the provider call.
+5. If `--force` was passed → skip the confirmation prompt, proceed directly.
+
+#### Shared: WIP Limit Check (→ in-progress transitions)
+
+Run this check **after** state machine validation and **before** the provider call, only when transitioning to `in-progress`.
+
+1. Read `wip_limit` from `.project/config.yaml`. If absent — skip check entirely.
+2. Fetch count of tickets currently in `in-progress` state in the active sprint (single MCP list call filtered by state).
+3. If count is **below** `wip_limit` — proceed silently.
+4. If count is **at or above** `wip_limit`:
+   ```
+   ⚠ WIP limit is {wip_limit} — you have {count} ticket(s) in-progress.
+   Continue? [y/n]
+   ```
+   On `n` → output `Transition cancelled` and stop. On `y` → proceed with the provider call.
+
 - **GitHub, Jira, Plane**: call `update_ticket` directly.
 - **GitLab**: use **Shared: GitLab Write Path Resolution** + label-delta helper to apply the transition. For `blocked`: prompt for reason + optional blocking ticket ref before calling the resolved write path.
 
@@ -1119,7 +1215,14 @@ Accept canonical state filter. Translate to provider query syntax via `state_map
 
 ## MODE: sprint
 
-### Step 1 — Detect sub-mode: create | add | remove | labels | status | milestone
+### Step 1 — Detect sub-mode: create | add | remove | plan | review | retro | close | labels | status | milestone
+
+| Input contains | Sub-mode |
+|---|---|
+| "plan sprint", "sprint planning", "sprint plan" | **plan** |
+| "sprint review", "review sprint", "what shipped" | **review** |
+| "sprint retro", "retrospective", "retro" | **retro** |
+| "sprint close", "close sprint", "end sprint", "finish sprint" | **close** |
 
 ### Sub-mode: sprint create
 
@@ -1201,6 +1304,134 @@ active_sprint:
 ```
 Output: `✓ Sprint {label_value} created ({start} – {end})`
 
+### Sub-mode: sprint plan
+
+Guard: if no `active_sprint` in config → output `No active sprint — run sprint create first` and stop.
+
+**Step 1 — Fetch backlog candidates**
+
+Fetch all tickets in `backlog` or `todo` state that are NOT already assigned to the active sprint. Collect: id, title, priority, estimate, labels, description.
+
+**Step 2 — Rank by priority**
+
+Sort: critical → high → medium → low → unset.
+
+**Step 3 — Check Definition of Ready per ticket**
+
+A ticket passes DoR if it has a non-empty description AND at least one label. Flag failing tickets with `⚠ not ready`.
+
+**Step 4 — Present candidate list**
+
+```
+Sprint Plan — {sprint_id}
+Backlog candidates (ranked by priority):
+
+  #  ID        Priority  Est  DoR       Title
+  1  TICK-55   high      5    ✓         Add OAuth scopes
+  2  TICK-60   high      3    ⚠ no desc Rate limit middleware
+  3  TICK-48   medium    2    ✓         Fix session timeout
+  4  TICK-62   medium    —    ⚠ no lbl  Update README
+  5  TICK-71   low       1    ✓         Refactor config loader
+
+Enter ticket numbers to add (comma-separated), or "done" to finish:
+```
+
+**Step 5 — Add selected tickets to sprint**
+
+For each selected number: call the sprint-add flow (same as `sprint add`). Report each addition.
+
+Output summary:
+```
+Added to {sprint_id}: TICK-55, TICK-48, TICK-71
+```
+
+---
+
+### Sub-mode: sprint review
+
+Guard: if no `active_sprint` in config → output `No active sprint` and stop.
+
+**Step 1 — Fetch done tickets**
+
+Fetch all tickets in `done` state assigned to the active sprint. Collect: id, title, labels, estimate, assignees.
+
+**Step 2 — Group by label**
+
+Group tickets by their first non-state label (if any). Tickets with no labels go into an "Unlabelled" group.
+
+**Step 3 — Compute commitment vs. delivered**
+
+Commitment = total in-sprint ticket count at sprint start. Derive from total tickets currently in the sprint (done + not-done). Delivered = count of done tickets.
+
+**Step 4 — Output shipped summary**
+
+```
+Sprint Review — {sprint_id}
+──────────────────────────────────────
+Delivered: {done_count}/{total_count} tickets ({pct}%)
+Points shipped: {sum of done estimates or "N/A"}
+
+backend (3 tickets):
+  TICK-30  Auth token refresh
+  TICK-31  Session expiry fix
+  TICK-32  Rate limit endpoint
+
+frontend (2 tickets):
+  TICK-35  Login form validation
+  TICK-36  Error toast component
+
+Unlabelled (1 ticket):
+  TICK-38  Update CHANGELOG
+──────────────────────────────────────
+{done_count} shipped, {not_done_count} carried over.
+```
+
+---
+
+### Sub-mode: sprint retro
+
+Guard: if no `active_sprint` in config → output `No active sprint` and stop.
+
+**Step 1 — Prompt for three sections**
+
+```
+Sprint Retro — {sprint_id}
+
+What went well? (free text, Enter to finish):
+> _
+
+What should we improve? (free text, Enter to finish):
+> _
+
+Action items? (one per line, empty line to finish):
+> _
+```
+
+**Step 2 — Ensure retro label exists**
+
+Call `list_labels`. If no `retro` label found, create it with colour `#fbca04`.
+
+**Step 3 — Create retro issue**
+
+Create a tracker issue (no sprint assignment):
+- **Title**: `Retro: {sprint_id}`
+- **Labels**: `retro`
+- **Body**:
+```
+## Went Well
+{went_well or "(none)"}
+
+## To Improve
+{to_improve or "(none)"}
+
+## Action Items
+{action_items formatted as a checklist, or "(none)"}
+```
+
+Output: `✓ Retro issue created: {issue_url}`
+
+---
+
 ### Sub-mode: sprint add / remove
 
 Read `sprint_proxy` from config.
@@ -1210,6 +1441,56 @@ Read `sprint_proxy` from config.
 - **remove**: resolve the write path, then apply `remove_labels: active_sprint.label_name`
 
 **All other providers**: resolve sprint ID from `active_sprint.id` in config. Call `add_issue_to_sprint` / remove equivalent.
+
+### Sub-mode: sprint close
+
+**Step 1 — Tally completed points**
+
+Fetch all done-state tickets in the active sprint. Sum their `estimate` fields (skip tickets with no estimate). Store as `points_completed`.
+
+Read `capacity` from the pm-meta issue description (GitLab CE) or from `active_sprint` metadata. Store as `points_committed` (null if absent).
+
+**Step 2 — Idempotency check**
+
+Read `velocity_log` from `.project/config.yaml`. Derive `sprint_id`:
+- GitLab CE: `active_sprint.label_name`
+- All others: `active_sprint.id` (coerced to string) or `active_sprint.name`
+
+If an entry with matching `sprint` already exists in `velocity_log`:
+```
+⚠ velocity_log already has an entry for {sprint_id} — skipping duplicate.
+```
+Skip Step 3 and continue to Step 4.
+
+**Step 3 — Append to velocity_log**
+
+Append to `velocity_log` in `.project/config.yaml`:
+```yaml
+- sprint: "{sprint_id}"
+  points_committed: {points_committed or null}
+  points_completed: {points_completed}
+```
+
+**Step 4 — Close sprint in provider**
+
+| Provider | Action |
+|---|---|
+| GitHub | Call `mcp__github__update_milestone` with `state: closed` using `active_sprint.id` |
+| GitLab EE | Call native iteration close tool |
+| GitLab CE | No provider API — output `ℹ GitLab CE label-based sprints have no close API — config cleared` |
+| Jira | Call complete-sprint MCP tool with `active_sprint.id` |
+| Plane | Call `mcp__plane__close_cycle` with `active_sprint.id` |
+
+**Step 5 — Clear active sprint from config**
+
+Remove `active_sprint` key from `.project/config.yaml`.
+
+Output:
+```
+✓ Sprint {sprint_id} closed.
+  Committed: {points_committed or "N/A"} pts  |  Completed: {points_completed} pts
+  velocity_log updated. Next: run sprint create to start a new sprint.
+```
 
 ### Sub-mode: labels
 
@@ -1262,10 +1543,47 @@ For Plane fallback: search issues by `milestone:*` label prefix.
 
 **Ticket fetch**: use `active_sprint.label_name` as the label filter for GitLab CE repos (`sprint_proxy: label`); use milestone/sprint ID for all other providers.
 
-**Single-repo** (no `context_repos` configured): fetch all active sprint tickets using the anchor's provider. Group by canonical state. Display unchanged v1 format:
+#### Sprint Health & WIP (shown before state breakdown)
+
+After fetching tickets, compute and display two lines above the state breakdown:
+
+**Sprint health** — requires estimates on at least one ticket and `active_sprint.start` + `active_sprint.end` in config:
+
+```
+expected_done = (days_elapsed / sprint_days_total) × total_committed_points
+actual_done   = sum of estimate fields on done-state tickets
+```
+
+| actual_done / expected_done | Category |
+|---|---|
+| ≥ 90% | ON-TRACK |
+| 70–89% | AT-RISK |
+| < 70% | OFF-TRACK |
+
+```
+Sprint health: ▓▓▓▓░░░░ 12/21 pts (57%) · AT-RISK — 5 days left
+```
+
+- `▓` blocks = floor((actual_done / total_committed_points) × 8), `░` = remaining up to 8
+- `total_committed_points` = sum of all in-sprint ticket estimates (regardless of state)
+- `days_left` = `active_sprint.end` − today (in calendar days)
+- If no ticket has an estimate: `Sprint health: N/A (no estimates)`
+- If `active_sprint.start` or `active_sprint.end` absent: omit health line silently
+
+**WIP display** — only when `wip_limit` is set in config:
+
+```
+WIP: 2/3
+```
+
+If count ≥ `wip_limit`: `WIP: 3/3 ⚠ limit reached`
+
+**Single-repo** (no `context_repos` configured): fetch all active sprint tickets using the anchor's provider. Group by canonical state. Display:
 
 ```
 Sprint 4 — 12 tickets
+Sprint health: ▓▓▓▓░░░░ 12/21 pts (57%) · AT-RISK — 5 days left
+WIP: 2/3
 ──────────────────────────────────────────
 backlog      2   TICK-50, TICK-51
 todo         3   TICK-42, TICK-43, TICK-44
@@ -1292,6 +1610,51 @@ blocked:
 ```
 
 Repos with no `active_sprint` are listed as: `[../service-name/] — no active sprint`.
+
+---
+
+## MODE: standup
+
+Guard: if no `active_sprint` in config → output `No active sprint — run sprint create first` and stop.
+
+### Step 1 — Fetch active sprint tickets
+
+Fetch all tickets in the active sprint (same filter as `status` mode). Collect: id, title, canonical_state, assignees, blocked_by.
+
+Derive `current_user` from provider identity (GitHub: `mcp__github__get_authenticated_user`; GitLab: `mcp__gitlab__get_user`; Jira/Plane: read from config or ask once).
+
+### Step 2 — What I did
+
+Filter to tickets assigned to `current_user` with canonical state `in-review` or `done`.
+
+### Step 3 — What I'll work on
+
+Run the same scoring algorithm as **MODE: next** (Steps 3–5) over the full sprint ticket set. Output the top recommendation with one-line reasoning.
+
+### Step 4 — Blockers
+
+Filter all in-sprint tickets (any assignee) with canonical state `blocked`. Extract the blocking reason from the ticket body (look for `Blocked by:` or `blocked:` pattern in the description).
+
+### Step 5 — Output
+
+```
+## What I did
+  TICK-35  Login form validation  (in-review)
+  TICK-32  Auth token refresh     (done)
+
+## What I'll work on
+  TICK-42 — Rate limit middleware
+  High priority, no open dependencies, unblocks 2 tickets.
+  Ready to start? /project-management start TICK-42
+
+## Blockers
+  TICK-41  Session timeout fix  (blocked: waiting on infra access)
+
+---
+Note: "What I did" reflects current ticket states, not a timestamped activity log.
+```
+
+If a section has no items, show `(none)` under the heading. Always output all three sections in this order.
 
 ---
 
@@ -1506,11 +1869,13 @@ Reverse-map the raw provider state to canonical state via `state_mapping`:
 
 | Canonical state | Action |
 |---|---|
-| `todo` | Ask: "Move TICK-<id> to in-progress? [y/n]" → on Y call `update_ticket` translating via `state_mapping` |
-| `in-progress` | Silent no-op — already started |
+| `todo` | Ask: "Move TICK-<id> to in-progress? [y/n]" → on Y run **WIP Limit Check** (below), then call `update_ticket` translating via `state_mapping` |
+| `in-progress` | Silent no-op — already started (no WIP check needed — slot already occupied) |
 | `backlog` | Warn: "TICK-<id> is in backlog and not assigned to the active sprint. Continue anyway? [y/n]" |
 | `in-review` or `done` | Warn: "TICK-<id> is already `<state>` — continuing in exploration mode." |
 | `blocked` | Warn: "TICK-<id> is blocked. Note the blocker before exploring." |
+
+**WIP Limit Check in start mode**: apply the same **Shared: WIP Limit Check** logic defined in `ticket update`. If user answers `n` to the WIP confirmation, output `Transition cancelled — continuing in exploration mode (ticket stays in todo).` and proceed to Step 5 without the state change. The `--no-branch` flag does NOT bypass the WIP check.
 
 ### Step 5 — Branch creation
 

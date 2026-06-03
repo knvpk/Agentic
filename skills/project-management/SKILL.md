@@ -96,6 +96,7 @@ Run Query Normalization first, then route:
 | "standup", "daily standup", "stand up", "daily" | **standup** |
 | "backlog refine", "refine backlog", "estimate tickets", "grooming", "backlog grooming" | **backlog → refine** |
 | "bulk", "generate tickets", "create tickets from docs", "populate backlog", "generate backlog" | **bulk** |
+| "sync ticket", "post to ticket", "update ticket", "archive sync", "sync issue", "capture this", "capture" | **sync** |
 
 ---
 
@@ -137,6 +138,7 @@ DAILY WORKFLOW
   standup   Daily standup: what I did / what's next / blockers
   status    Sprint board grouped by canonical state with health signal
   backlog   Refine unestimated backlog tickets (story points + DoR check)
+  sync      Post archive summary or explore conclusion to linked ticket
 
 Type: help <mode>  for details. Example: help sprint
 ```
@@ -300,11 +302,33 @@ bulk — generate a full backlog from docs/
     "populate backlog"
 ```
 
+**`help sync`**
+```
+sync — post archive summary or explore conclusion to linked ticket
+
+  Two sub-modes:
+    sync archive [change-name]  Gather spec diff + git diff + session thread for an
+                                archived change and post a summary comment to its
+                                linked issue. Run after opsx:archive completes.
+    sync capture                Post the current explore conclusion to the linked
+                                ticket. Use during an explore session when a decision
+                                crystallises.
+
+  Requires linked_issue in openspec/changes/.openspec.yaml (written by `start` mode).
+  Degrades gracefully when no linked issue is stored or tracker write fails.
+
+  Examples:
+    "sync ticket"
+    "post to ticket"
+    "capture this"
+    "sync archive my-change"
+```
+
 **Unknown mode fallback**
 
 If the word after "help" does not match any known mode name, output:
 ```
-Unknown mode: <name>. Valid modes: init, docs, ticket, sprint, next, start, status, standup, backlog, bulk
+Unknown mode: <name>. Valid modes: init, docs, ticket, sprint, next, start, status, standup, backlog, bulk, sync
 ```
 
 ---
@@ -2314,8 +2338,28 @@ I want to explore the implementation for this ticket before starting work:
 
 <context block>
 
+Ticket context for linked issue tracking:
+  provider: <provider name from config>
+  project_ref: <project path or key from config>
+  id: "<ticket id>"
+  url: <ticket URL>
+
 Let's think through: requirements, ambiguities, edge cases, and which parts of the codebase are likely involved.
 ```
+
+After the explore session ends (or when the user moves to implementation), check if a new change was created under `openspec/changes/`. If a new `.openspec.yaml` exists without a `linked_issue` block, write it now:
+
+```yaml
+linked_issue:
+  provider: <provider from config>
+  project_ref: <project_ref from config>
+  id: "<ticket id>"
+  url: <ticket URL>
+base_ref: <output of: git rev-parse HEAD>
+```
+
+Also scan `system-reminder` for `archive-ticket-sync`. If present and a `linked_issue` was written, note to the user:
+> "Ticket context stored. After implementation, run `/archive-ticket-sync` to post a summary to #<id> when you archive."
 
 #### Step 7b — Fallback if opsx:explore not loaded
 
@@ -2349,3 +2393,179 @@ If any MCP call returns an unexpected 403 mid-session:
 2. Update `config.yaml` with the new flag.
 3. Retry the operation using the fallback strategy.
 4. Notify: "⚠ {Feature} support not available — switched to {fallback} fallback."
+
+---
+
+## MODE: sync
+
+Post a change summary or explore conclusion to the linked issue tracker ticket.
+
+Two sub-modes: **archive** (post-archive summary) and **capture** (mid-session conclusion).
+
+### Sub-mode routing
+
+| Input | Sub-mode |
+|-------|----------|
+| "sync archive", "post to ticket", "update ticket", "archive sync", "sync issue" | **sync → archive** |
+| "capture this", "capture", "post this decision", "save this to ticket" | **sync → capture** |
+
+If input is just "sync" with no qualifier, check context: if `opsx:archive` was just run → archive sub-mode; if inside an explore session → capture sub-mode; otherwise ask.
+
+---
+
+### sync → archive
+
+Run after `opsx:archive` completes to post a change summary to the linked ticket.
+
+**Input**: optional change name. If omitted, look for the most recently modified directory under `openspec/changes/archive/` (by `created` date in `.openspec.yaml`). If still ambiguous, ask.
+
+#### Step 1 — Read linked_issue
+
+Read `openspec/changes/archive/<YYYY-MM-DD-name>/.openspec.yaml`.
+
+If `linked_issue` is absent: output `No linked issue found — skipping ticket sync.` and stop.
+
+Extract:
+```yaml
+linked_issue:
+  provider: gitlab|github|jira|plane
+  project_ref: org/repo
+  id: "42"
+  url: https://...
+base_ref: <sha>   # optional
+```
+
+#### Step 2 — Gather signals (run in parallel)
+
+**Spec signal**
+
+Check `openspec/changes/archive/<YYYY-MM-DD-name>/specs/`. If none: `spec_signal = []`.
+
+For each delta spec found:
+- Read `openspec/changes/archive/<YYYY-MM-DD-name>/specs/<capability>/spec.md`
+- Read `openspec/specs/<capability>/spec.md` (may not exist for new capabilities)
+- Extract as bullets: new requirements, modified requirements, new/removed capabilities
+
+**Git signal**
+
+Determine anchor:
+1. `base_ref` from `.openspec.yaml` → `git diff <base_ref>..HEAD --stat`
+2. Fallback → `git diff $(git merge-base HEAD main 2>/dev/null || git merge-base HEAD master 2>/dev/null)..HEAD --stat`
+
+Extract: top 10 changed files by lines (skip binaries), total `N files, X insertions, Y deletions`.
+
+**Thread signal**
+
+Scan current conversation for:
+- Decisions: "we decided", "going with", "ruled out", "won't", "confirmed"
+- Scope changes: "out of scope", "added to scope", "scope changed"
+- Ticket refs: `#N`, `PROJ-N`, full issue URLs — collect as `related_refs` (exclude primary `id`)
+
+#### Step 3 — Skip heuristic
+
+Skip if ALL are true:
+- Spec signal empty or formatting-only changes
+- Git signal touches only `.md` files or is empty
+- Thread signal has no decisions or scope changes
+
+Output: `No substantive changes detected — skipping ticket comment.` and stop.
+
+#### Step 4 — Synthesise draft
+
+```markdown
+## Change `<name>` archived
+
+**Specs:** <spec diff bullets, or "no delta specs">
+**Code:** <top changed files with +/- counts, or "no code changes detected">
+**Decisions:** <thread conclusions as bullets, or "none recorded this session">
+```
+
+#### Step 5 — Confirm and post
+
+Show draft. Use **AskUserQuestion**:
+> "Post this summary to <provider> issue #<id>?"
+
+Options: `Post it` | `Edit first` | `Skip`
+
+If `Edit first`: show as plain text, accept edits, re-confirm.
+
+**Provider routing:**
+
+| Provider | Write tool | Fallback 1 | Fallback 2 |
+|----------|-----------|-----------|-----------|
+| GitHub | `mcp__github__add_issue_comment(owner, repo, issue_number, body)` split from `project_ref` | — | — |
+| GitLab | `mcp__gitlab__create_note(project_id, issue_iid, body)` | `glab issue note <id> --project <project_ref> -m "..."` | `curl -X POST "$GITLAB_URL/api/v4/projects/<encoded_project_ref>/issues/<id>/notes" -H "PRIVATE-TOKEN: $GITLAB_TOKEN" -d "body=..."` |
+| Jira | Jira MCP comment tool from `tool_contracts` in `references/providers.json` | — | — |
+| Plane | Plane MCP comment tool from `tool_contracts` in `references/providers.json` | — | — |
+
+On write failure: print comment text to terminal with `⚠ Could not write to tracker — copy and post manually.`
+
+#### Step 6 — Acceptance criteria offer
+
+If spec signal contains new requirements, ask separately:
+> "Append these new acceptance criteria to the ticket body?"
+
+Options: `Yes, append` | `Skip`
+
+If yes: fetch current ticket body via provider read tool, append (do NOT overwrite):
+```markdown
+## Acceptance Criteria (from <change-name>)
+
+<new requirements from spec diff>
+```
+Write back via provider update tool. On failure: print section to terminal.
+
+#### Step 7 — Related tickets offer
+
+If `related_refs` non-empty (different from primary `id`):
+- Show: `Signals also mention: <list>`
+- **AskUserQuestion** (multi-select): `Comment on any of these too?`
+- For each selected: post `Related change \`<name>\` was archived. See <primary issue URL> for details.`
+
+---
+
+### sync → capture
+
+Post a single conclusion from the current explore session to the linked ticket.
+
+**Input**: conclusion text passed as argument, or extracted from the most recent exchange in conversation.
+
+#### Step 1 — Find active change with linked_issue
+
+Scan `openspec/changes/` (excluding `archive/`) for `.openspec.yaml` files containing a `linked_issue` block. Pick the most recently created (by `created` field).
+
+If none with `linked_issue`: offer to write conclusion to `openspec/changes/<name>/notes.md` instead (append, create if absent).
+
+If no active change at all: output `No active change found — conclusion not saved.` and stop.
+
+#### Step 2 — Draft and confirm
+
+Draft:
+```markdown
+**Explore note — <change-name>**
+
+<conclusion text>
+```
+
+Show preview. Use **AskUserQuestion**:
+> "Post this to <provider> #<id>?"
+
+Options: `Post it` | `Edit first` | `Skip`
+
+#### Step 3 — Post
+
+Use same provider routing table as sync → archive.
+
+On success: `✓ Posted to #<id>.`
+On failure: print text with `⚠ Could not post — copy above to post manually.`
+
+---
+
+### Guardrails
+
+- Never auto-post without user confirmation — always show draft first
+- Never overwrite ticket body — append only; require explicit `Yes, append` confirmation
+- Related ticket comments require confirmation — never auto-post
+- If all write paths fail, always print comment text to terminal
+- `base_ref` diff is preferred over `merge-base` heuristic
+- Skip heuristic: avoid noise comments on trivial/mechanical changes

@@ -1,6 +1,6 @@
 # Tasks
 
-## T1 — Add routing phrases to Mode Routing table
+## [x] T1 — Add routing phrases to Mode Routing table
 
 **File**: `skills/project-management/SKILL.md`
 **Section**: `## Mode Routing`
@@ -17,7 +17,7 @@ Add these rows to the routing table:
 
 ---
 
-## T2 — Add `release-notes` entry to help Variant A index
+## [x] T2 — Add `release-notes` entry to help Variant A index
 
 **File**: `skills/project-management/SKILL.md`
 **Section**: `## MODE: help` → Variant A → DAILY WORKFLOW block
@@ -33,7 +33,7 @@ Also update the unknown mode fallback list at the bottom of Variant B to include
 
 ---
 
-## T3 — Add `help release-notes` block to Variant B
+## [x] T3 — Add `help release-notes` block to Variant B
 
 **File**: `skills/project-management/SKILL.md`
 **Section**: `## MODE: help` → Variant B — after the `help ship` block
@@ -66,7 +66,7 @@ release-notes — generate release notes from git tags
 
 ---
 
-## T4 — Implement `## MODE: release-notes` section
+## [x] T4 — Implement `## MODE: release-notes` section
 
 **File**: `skills/project-management/SKILL.md`
 **Location**: After `## MODE: ship` (end of file)
@@ -88,7 +88,7 @@ Implement the full mode as specified in `specs/release-notes-mode/spec.md`. The 
 
 ---
 
-## T5 — Document optional `release` config block
+## [x] T5 — Document optional `release` config block
 
 **File**: `skills/project-management/SKILL.md`
 **Location**: Within the `## MODE: release-notes` section (Step 9 or a config note subsection)

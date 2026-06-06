@@ -96,6 +96,11 @@ Run Query Normalization first, then route:
 | "standup", "daily standup", "stand up", "daily" | **standup** |
 | "backlog refine", "refine backlog", "estimate tickets", "grooming", "backlog grooming" | **backlog → refine** |
 | "bulk", "generate tickets", "create tickets from docs", "populate backlog", "generate backlog" | **bulk** |
+| "sync ticket", "post to ticket", "update ticket", "archive sync", "sync issue", "capture this", "capture" | **sync** |
+| "ship", "ship my changes", "commit and pr", "commit and create pr", "push and pr", "commit all changes" | **ship** |
+| "release notes", "release this", "generate release notes" | **release-notes** |
+| "release notes for uat", "release candidate" | **release-notes** (UAT framing) |
+| "release notes for prod", "release to production", "release notes for production" | **release-notes** (PROD framing) |
 
 ---
 
@@ -137,6 +142,9 @@ DAILY WORKFLOW
   standup   Daily standup: what I did / what's next / blockers
   status    Sprint board grouped by canonical state with health signal
   backlog   Refine unestimated backlog tickets (story points + DoR check)
+  sync      Post archive summary or explore conclusion to linked ticket
+  ship      Commit all changes, push, and open a PR in one command
+  release-notes  Generate release notes from git tags (prev-tag → current-tag)
 
 Type: help <mode>  for details. Example: help sprint
 ```
@@ -300,11 +308,77 @@ bulk — generate a full backlog from docs/
     "populate backlog"
 ```
 
+**`help sync`**
+```
+sync — post archive summary or explore conclusion to linked ticket
+
+  Two sub-modes:
+    sync archive [change-name]  Gather spec diff + git diff + session thread for an
+                                archived change and post a summary comment to its
+                                linked issue. Run after opsx:archive completes.
+    sync capture                Post the current explore conclusion to the linked
+                                ticket. Use during an explore session when a decision
+                                crystallises.
+
+  Requires linked_issue in openspec/changes/.openspec.yaml (written by `start` mode).
+  Degrades gracefully when no linked issue is stored or tracker write fails.
+
+  Examples:
+    "sync ticket"
+    "post to ticket"
+    "capture this"
+    "sync archive my-change"
+```
+
+**`help ship`**
+```
+ship — commit, push, and create a PR in one command
+
+  Stages all changes, generates a conventional commit message from the diff,
+  confirms with you, commits, pushes, and creates a PR.
+
+  Enriches the commit with a ticket ID parsed from the branch name or
+  current_ticket in .project/config.yaml (if set).
+
+  Works without .project/config.yaml — auto-detects provider from git remote.
+  Skips PR creation for Jira and Plane (commit + push only).
+
+  Options at confirmation:
+    y        proceed
+    e        edit the commit message
+    n        abort — nothing is committed
+
+  Examples:
+    "ship"
+    "commit and pr"
+    "commit all changes"
+```
+
+**`help release-notes`**
+```
+release-notes — generate release notes from git tags
+
+  Diffs current tag against the previous semver tag, extracts resolved tracker
+  tickets, groups by label, and publishes to GitLab Release or docs/release_notes/.
+
+  Must be run while on a git tag (e.g. after `git checkout v1.2.0`).
+
+  Optional qualifiers:
+    (none)       neutral framing — "Release v1.2.0"
+    for uat      candidate framing — "Release Candidate v1.2.0"
+    for prod     production framing — "Released v1.2.0 to production"
+
+  Examples:
+    "release notes"
+    "release notes for uat"
+    "release notes for prod"
+```
+
 **Unknown mode fallback**
 
 If the word after "help" does not match any known mode name, output:
 ```
-Unknown mode: <name>. Valid modes: init, docs, ticket, sprint, next, start, status, standup, backlog, bulk
+Unknown mode: <name>. Valid modes: init, docs, ticket, sprint, next, start, status, standup, backlog, bulk, sync, ship, release-notes
 ```
 
 ---
@@ -2314,8 +2388,28 @@ I want to explore the implementation for this ticket before starting work:
 
 <context block>
 
+Ticket context for linked issue tracking:
+  provider: <provider name from config>
+  project_ref: <project path or key from config>
+  id: "<ticket id>"
+  url: <ticket URL>
+
 Let's think through: requirements, ambiguities, edge cases, and which parts of the codebase are likely involved.
 ```
+
+After the explore session ends (or when the user moves to implementation), check if a new change was created under `openspec/changes/`. If a new `.openspec.yaml` exists without a `linked_issue` block, write it now:
+
+```yaml
+linked_issue:
+  provider: <provider from config>
+  project_ref: <project_ref from config>
+  id: "<ticket id>"
+  url: <ticket URL>
+base_ref: <output of: git rev-parse HEAD>
+```
+
+Also scan `system-reminder` for `archive-ticket-sync`. If present and a `linked_issue` was written, note to the user:
+> "Ticket context stored. After implementation, run `/archive-ticket-sync` to post a summary to #<id> when you archive."
 
 #### Step 7b — Fallback if opsx:explore not loaded
 
@@ -2349,3 +2443,519 @@ If any MCP call returns an unexpected 403 mid-session:
 2. Update `config.yaml` with the new flag.
 3. Retry the operation using the fallback strategy.
 4. Notify: "⚠ {Feature} support not available — switched to {fallback} fallback."
+
+---
+
+## MODE: sync
+
+Post a change summary or explore conclusion to the linked issue tracker ticket.
+
+Two sub-modes: **archive** (post-archive summary) and **capture** (mid-session conclusion).
+
+### Sub-mode routing
+
+| Input | Sub-mode |
+|-------|----------|
+| "sync archive", "post to ticket", "update ticket", "archive sync", "sync issue" | **sync → archive** |
+| "capture this", "capture", "post this decision", "save this to ticket" | **sync → capture** |
+
+If input is just "sync" with no qualifier, check context: if `opsx:archive` was just run → archive sub-mode; if inside an explore session → capture sub-mode; otherwise ask.
+
+---
+
+### sync → archive
+
+Run after `opsx:archive` completes to post a change summary to the linked ticket.
+
+**Input**: optional change name. If omitted, look for the most recently modified directory under `openspec/changes/archive/` (by `created` date in `.openspec.yaml`). If still ambiguous, ask.
+
+#### Step 1 — Read linked_issue
+
+Read `openspec/changes/archive/<YYYY-MM-DD-name>/.openspec.yaml`.
+
+If `linked_issue` is absent: output `No linked issue found — skipping ticket sync.` and stop.
+
+Extract:
+```yaml
+linked_issue:
+  provider: gitlab|github|jira|plane
+  project_ref: org/repo
+  id: "42"
+  url: https://...
+base_ref: <sha>   # optional
+```
+
+#### Step 2 — Gather signals (run in parallel)
+
+**Spec signal**
+
+Check `openspec/changes/archive/<YYYY-MM-DD-name>/specs/`. If none: `spec_signal = []`.
+
+For each delta spec found:
+- Read `openspec/changes/archive/<YYYY-MM-DD-name>/specs/<capability>/spec.md`
+- Read `openspec/specs/<capability>/spec.md` (may not exist for new capabilities)
+- Extract as bullets: new requirements, modified requirements, new/removed capabilities
+
+**Git signal**
+
+Determine anchor:
+1. `base_ref` from `.openspec.yaml` → `git diff <base_ref>..HEAD --stat`
+2. Fallback → `git diff $(git merge-base HEAD main 2>/dev/null || git merge-base HEAD master 2>/dev/null)..HEAD --stat`
+
+Extract: top 10 changed files by lines (skip binaries), total `N files, X insertions, Y deletions`.
+
+**Thread signal**
+
+Scan current conversation for:
+- Decisions: "we decided", "going with", "ruled out", "won't", "confirmed"
+- Scope changes: "out of scope", "added to scope", "scope changed"
+- Ticket refs: `#N`, `PROJ-N`, full issue URLs — collect as `related_refs` (exclude primary `id`)
+
+#### Step 3 — Skip heuristic
+
+Skip if ALL are true:
+- Spec signal empty or formatting-only changes
+- Git signal touches only `.md` files or is empty
+- Thread signal has no decisions or scope changes
+
+Output: `No substantive changes detected — skipping ticket comment.` and stop.
+
+#### Step 4 — Synthesise draft
+
+```markdown
+## Change `<name>` archived
+
+**Specs:** <spec diff bullets, or "no delta specs">
+**Code:** <top changed files with +/- counts, or "no code changes detected">
+**Decisions:** <thread conclusions as bullets, or "none recorded this session">
+```
+
+#### Step 5 — Confirm and post
+
+Show draft. Use **AskUserQuestion**:
+> "Post this summary to <provider> issue #<id>?"
+
+Options: `Post it` | `Edit first` | `Skip`
+
+If `Edit first`: show as plain text, accept edits, re-confirm.
+
+**Provider routing:**
+
+| Provider | Write tool | Fallback 1 | Fallback 2 |
+|----------|-----------|-----------|-----------|
+| GitHub | `mcp__github__add_issue_comment(owner, repo, issue_number, body)` split from `project_ref` | — | — |
+| GitLab | `mcp__gitlab__create_note(project_id, issue_iid, body)` | `glab issue note <id> --project <project_ref> -m "..."` | `curl -X POST "$GITLAB_URL/api/v4/projects/<encoded_project_ref>/issues/<id>/notes" -H "PRIVATE-TOKEN: $GITLAB_TOKEN" -d "body=..."` |
+| Jira | Jira MCP comment tool from `tool_contracts` in `references/providers.json` | — | — |
+| Plane | Plane MCP comment tool from `tool_contracts` in `references/providers.json` | — | — |
+
+On write failure: print comment text to terminal with `⚠ Could not write to tracker — copy and post manually.`
+
+#### Step 6 — Acceptance criteria offer
+
+If spec signal contains new requirements, ask separately:
+> "Append these new acceptance criteria to the ticket body?"
+
+Options: `Yes, append` | `Skip`
+
+If yes: fetch current ticket body via provider read tool, append (do NOT overwrite):
+```markdown
+## Acceptance Criteria (from <change-name>)
+
+<new requirements from spec diff>
+```
+Write back via provider update tool. On failure: print section to terminal.
+
+#### Step 7 — Related tickets offer
+
+If `related_refs` non-empty (different from primary `id`):
+- Show: `Signals also mention: <list>`
+- **AskUserQuestion** (multi-select): `Comment on any of these too?`
+- For each selected: post `Related change \`<name>\` was archived. See <primary issue URL> for details.`
+
+---
+
+### sync → capture
+
+Post a single conclusion from the current explore session to the linked ticket.
+
+**Input**: conclusion text passed as argument, or extracted from the most recent exchange in conversation.
+
+#### Step 1 — Find active change with linked_issue
+
+Scan `openspec/changes/` (excluding `archive/`) for `.openspec.yaml` files containing a `linked_issue` block. Pick the most recently created (by `created` field).
+
+If none with `linked_issue`: offer to write conclusion to `openspec/changes/<name>/notes.md` instead (append, create if absent).
+
+If no active change at all: output `No active change found — conclusion not saved.` and stop.
+
+#### Step 2 — Draft and confirm
+
+Draft:
+```markdown
+**Explore note — <change-name>**
+
+<conclusion text>
+```
+
+Show preview. Use **AskUserQuestion**:
+> "Post this to <provider> #<id>?"
+
+Options: `Post it` | `Edit first` | `Skip`
+
+#### Step 3 — Post
+
+Use same provider routing table as sync → archive.
+
+On success: `✓ Posted to #<id>.`
+On failure: print text with `⚠ Could not post — copy above to post manually.`
+
+---
+
+### Guardrails
+
+- Never auto-post without user confirmation — always show draft first
+- Never overwrite ticket body — append only; require explicit `Yes, append` confirmation
+- Related ticket comments require confirmation — never auto-post
+- If all write paths fail, always print comment text to terminal
+- `base_ref` diff is preferred over `merge-base` heuristic
+- Skip heuristic: avoid noise comments on trivial/mechanical changes
+
+---
+
+## MODE: ship
+
+Stage all changes, generate a conventional commit message, confirm, commit, push, and create a PR. Works standalone with no config; enriched when `.project/config.yaml` or a linked ticket is available.
+
+### Step 0 — Pre-flight checks
+
+1. Run `git status --porcelain`. If output is empty → emit `Nothing to commit — working tree clean` and stop.
+2. Run `git branch --show-current`. If output is empty (detached HEAD) → emit `✗ Detached HEAD — cannot push. Checkout a branch first.` and stop.
+
+Store: `current_branch`.
+
+### Step 1 — Ticket ID resolution
+
+1. Parse `current_branch` for pattern `[A-Z]+-\d+` (case-insensitive, first match wins).
+   - e.g. `feat/TICK-42-auth-refresh` → `TICK-42`
+   - e.g. `fix/AUTH-7/token-expiry` → `AUTH-7`
+2. If no match, read `current_ticket` from `.project/config.yaml` (absent or file missing = skip).
+3. Store result as `ticket_id` (null if neither source yields a value).
+
+### Step 2 — Provider detection
+
+1. If `.project/config.yaml` exists and has `provider.name` + `provider.mcp_prefix` → use them.
+2. Otherwise run `git remote get-url origin`. Match hostname:
+   - `github.com` → `{ name: "github", mcp_prefix: "mcp__github__" }`
+   - `gitlab.*` → `{ name: "gitlab", mcp_prefix: "mcp__gitlab__" }`
+   - No match → `{ name: null, mcp_prefix: null }`
+3. Store: `provider_name`, `mcp_prefix`.
+
+### Step 3 — Diff analysis and message generation
+
+1. Run `git diff HEAD` (full diff) and `git diff --name-only HEAD` (changed paths).
+2. Classify conventional commit type from changed file paths:
+   - Any path contains `fix`, `bug`, `patch`, `hotfix` → `fix`
+   - All paths in `docs/` or are `*.md` only → `docs`
+   - All paths are config files only (`*.yaml`, `*.json`, `*.toml`, `*.lock`) → `chore`
+   - Default → `feat`
+3. Derive title (≤60 chars):
+   - If `ticket_id` is known and `current_ticket.title` is in config → use the ticket title
+   - Otherwise → summarise the most significant change from the diff (largest added block, first changed function/section name)
+4. Compose commit message:
+   - With ticket: `{ticket_id}: {type}: {title}`
+   - Without ticket: `{type}: {title}`
+
+### Step 4 — Confirmation
+
+Display:
+```
+Proposed commit:
+  {commit_message}
+
+Branch: {current_branch} → {base_branch}
+PR title: {commit_message}
+
+Proceed? [y / e to edit / n to abort]
+```
+
+- **y** → proceed to Step 5
+- **e** → prompt `New message:` (single line); replace `commit_message`; re-display and ask `[y/n]`
+- **n** → emit `Aborted — no changes committed` and stop
+
+### Step 5 — Stage, commit, push
+
+```
+git add -A
+git commit -m "{commit_message}"
+git push -u origin {current_branch}
+```
+
+On `git push` failure: emit the git error verbatim followed by `✗ Push failed — resolve conflicts or check remote permissions` and stop.
+
+### Step 6 — PR creation
+
+Determine `base_branch`: read `base_branch` from `.project/config.yaml`; default to `main` if absent or file missing.
+
+**PR body:**
+```
+{one-sentence summary derived from commit message}
+
+{if ticket_id known} Closes #{ticket_id}
+
+---
+https://claude.ai/code/session_01LGsHbjx8qnfDnarVyuzVdG
+```
+
+For GitHub use `Closes #<number>` (numeric issue ID). For GitLab use `Closes <ticket_key>`.
+
+**GitHub** (`provider_name == "github"`):
+1. ToolSearch(`mcp__github__create_pull_request`) — if found, call with `title`, `body`, `head: current_branch`, `base: base_branch`.
+2. On duplicate-PR error (branch already has an open PR): extract existing URL from error, emit `ℹ PR already exists: {url}` and stop cleanly.
+3. On success: emit `✓ PR created: {pr_url}`
+
+**GitLab** (`provider_name == "gitlab"`):
+1. ToolSearch(`mcp__gitlab__create_merge_request`) — if found, call with equivalent fields.
+2. Same duplicate and success handling as GitHub.
+
+**Jira / Plane**: emit `ℹ {Provider} does not host PRs — pushed only` and stop.
+
+**No provider detected** or **MCP tool not found**: emit `ℹ No PR created — {reason}` where reason is `"provider not detected"` or `"MCP tool unavailable"`. Print the push URL so the user can open a PR manually.
+
+---
+
+## MODE: release-notes
+
+Generate ticket-level release notes by diffing two semver git tags. Publishes to a GitLab Release when the configured provider is GitLab; otherwise writes `docs/release_notes/{tag_name}.md`.
+
+### Step 0 — Parse environment qualifier
+
+Before any git calls, extract an optional environment qualifier from the user's input:
+
+| Input contains | `env_qualifier` |
+|---|---|
+| `for uat`, `uat`, `release candidate` | `uat` |
+| `for prod`, `prod`, `production`, `for production` | `prod` |
+| *(none)* | `none` |
+
+Store as `env_qualifier`. Used in Step 7.
+
+### Step 1 — Verify on a tag
+
+Run:
+```
+git describe --exact-match --tags HEAD
+```
+
+- **Success** → `current_tag` = trimmed output (e.g. `v1.2.0`)
+- **Failure** → emit:
+  ```
+  ⚠ Not on a git tag — checkout the tag you want to release notes for and re-run.
+  ```
+  Stop.
+
+### Step 2 — Find previous tag (semver-aware)
+
+Run:
+```
+git tag --sort=-version:refname | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]'
+```
+
+Returns all semver tags sorted newest-first. Find `current_tag` in the list; take the next entry as `previous_tag`.
+
+**First release fallback** — if `current_tag` is the only semver tag (no entry follows it in the list):
+```
+previous_ref = git rev-list --max-parents=0 HEAD
+```
+Emit: `ℹ First release — ranging from initial commit.`
+
+Store result as `previous_tag_or_ref`.
+
+### Step 3 — Collect commits in range
+
+Run:
+```
+git log {previous_tag_or_ref}..{current_tag} --format="%H %s"
+```
+
+If output is empty:
+```
+No commits between {previous_tag_or_ref} and {current_tag}.
+```
+Stop.
+
+Collect all lines as `commits` (list of `{hash, subject}`).
+
+### Step 3b — Collect OpenSpec spec changes (conditional)
+
+**OpenSpec detection**: check whether `openspec/specs/` exists in the repo root.
+
+- **Absent** → set `spec_changes = []` and skip this step entirely.
+- **Present** → run:
+  ```
+  git diff {previous_tag_or_ref}..{current_tag} -- openspec/specs/
+  ```
+
+Parse the diff output to build `spec_changes`: an array of `{capability, summary_lines[]}` objects, one per changed spec file. Derive `capability` from the file path — it is the directory name between `openspec/specs/` and `/spec.md` (e.g. `openspec/specs/auth-flow/spec.md` → `auth-flow`).
+
+For each changed spec file, read the `+` and `-` diff lines (excluding file header lines starting with `+++`/`---`) and synthesise human-readable summary bullets:
+
+| Diff signal | Summary bullet |
+|---|---|
+| `+` line adds a `## ` or `### ` heading | `Added section: {heading text}` |
+| `-` line removes a `## ` or `### ` heading | `Removed section: {heading text}` |
+| `+` line adds a `- The system SHALL` or `- SHALL` requirement | `New requirement: {requirement text, truncated to 120 chars}` |
+| `-` line removes a `- The system SHALL` or `- SHALL` requirement | `Removed requirement: {requirement text, truncated to 120 chars}` |
+| Net `+` lines > 20 with no structural markers above | `Expanded: {N} lines added` |
+| Net `-` lines > 20 with no structural markers above | `Reduced: {N} lines removed` |
+| Only minor changes (≤5 net lines, no structural markers) | `Minor edits` |
+
+Collect bullets as `summary_lines` for that capability. Omit capabilities where the only summary is `Minor edits` if there are 5 or more changed capabilities (de-noise for large releases).
+
+Sort `spec_changes` alphabetically by `capability`.
+
+If the diff produces no output (no spec files changed in this range): set `spec_changes = []`.
+
+### Step 4 — Extract ticket references
+
+For each commit subject, apply all four patterns in order (all patterns applied to every subject):
+
+| Pattern | Example | Notes |
+|---------|---------|-------|
+| `[A-Z]+-\d+` | `PROJ-42`, `AUTH-7` | Jira/Plane/GitLab project keys |
+| `(?:Closes?\|Fixes?\|Resolves?)\s+#(\d+)` | `Closes #42` | GitHub/GitLab closing keywords — capture group is the number |
+| `#(\d+)` | `#42` | Bare hash reference — capture group is the number |
+| Full issue URL ending in `/issues/\d+` or `/-/issues/\d+` | URL | Extract trailing number |
+
+Collect all matched IDs into `ticket_ids` (strings). Deduplicate. If count > 50: keep first 50, emit `ℹ {N} ticket references found — showing first 50`.
+
+Commits with no match go into `unlinked_commits` (store subject only).
+
+### Step 5 — Fetch ticket titles
+
+Emit: `Fetching {N} tickets…`
+
+For each ID in `ticket_ids`, call the provider's get-ticket tool using `mcp_prefix` from `.project/config.yaml`:
+- **GitHub**: `mcp__github__get_issue(issue_number: id)`
+- **GitLab**: `mcp__gitlab__get_issue(iid: id)`
+- **Jira / Plane**: get-issue tool from `tool_contracts` in `references/providers.json`
+
+On success: record `{id, title, labels}`.
+On any failure (MCP error, timeout, 404): record `{id, title: null, labels: []}` and continue — do not block.
+
+If `.project/config.yaml` is absent (no provider configured): set all titles to null, skip MCP calls, continue.
+
+Emit after all calls: `✓ {fetched}/{N} tickets resolved.`
+
+### Step 6 — Group by label
+
+**State labels to exclude** when selecting the group label: `todo`, `in-progress`, `in-review`, `blocked`.
+
+For each ticket, take its **first label that is not a state label** as the group key. Tickets with no qualifying label → group `Unlabelled`.
+
+Sort groups alphabetically. Within each group, preserve the order tickets appeared in the commit log.
+
+### Step 7 — Apply environment framing
+
+| `env_qualifier` | Header |
+|---|---|
+| `none` | `Release {current_tag}` |
+| `uat` | `Release Candidate {current_tag}` |
+| `prod` | `Released {current_tag} to production` |
+
+Store as `header`.
+
+### Step 8 — Build release body
+
+Read the template from `assets/release-notes-template.md` (relative to this skill file). Render it by substituting the variables below. The template uses Handlebars-style `{{variable}}` placeholders and `{{#if}}` / `{{#each}}` blocks.
+
+| Variable | Value |
+|---|---|
+| `{{header}}` | Environment-framed title from Step 7 |
+| `{{previous_tag_or_ref}}` | Previous tag or initial commit SHA |
+| `{{current_tag}}` | Current tag name |
+| `{{total_resolved}}` | Count of tickets with a resolved title |
+| `{{label_groups}}` | Array of `{name, count, plural, tickets[]}` — one entry per non-state label group, sorted alphabetically; omit groups with zero tickets |
+| `{{unlabelled_tickets}}` | Array of tickets with no qualifying label; omit `### Unlabelled` block if empty |
+| `{{other_commits}}` | Array of `{subject}` for unlinked commits |
+| `{{spec_changes}}` | Array of `{capability, summary_lines[]}` from Step 3b; empty array when not an OpenSpec project or no spec files changed |
+
+Rendering rules:
+- `{{#if plural}}` is true when count > 1 (for "tickets" vs "ticket" pluralisation).
+- Omit the `{{#if other_commits}}` block entirely if `unlinked_commits` is empty **or** if `release.include_unlinked_commits` is `false` in `.project/config.yaml`.
+- For tickets where title fetch failed: render `{{title}}` as `(title unavailable)`.
+
+Store the rendered output as `release_body`.
+
+### Step 9 — Publish
+
+Read `provider.name` from `.project/config.yaml` (treat as absent if file missing).
+
+#### GitLab (`provider.name == "gitlab"`)
+
+Use the same write-path resolution pattern as **Shared: GitLab Write Path Resolution**:
+
+**Step 1** — `ToolSearch("mcp__gitlab__create_release")`:
+- Found → call:
+  ```
+  mcp__gitlab__create_release(
+    project_id: gitlab_project_id,
+    tag_name: current_tag,
+    name: header,
+    description: release_body
+  )
+  ```
+  - On 409 / "already exists" error → emit `ℹ Release already exists for {current_tag} — skipping publish.` and print `release_body` to terminal.
+  - On success → emit `✓ GitLab Release created: {current_tag}`
+
+**Step 2** — Tool not found, `GITLAB_TOKEN` is set → REST:
+```
+POST /api/v4/projects/{gitlab_project_id}/releases
+Body: { "tag_name": current_tag, "name": header, "description": release_body }
+Header: PRIVATE-TOKEN: $GITLAB_TOKEN
+```
+Same 409 and success handling as Step 1.
+
+**Step 3** — Both unavailable → emit:
+```
+ℹ Could not publish to GitLab — copy the release notes below and create manually.
+```
+Print `release_body` to terminal.
+
+#### All other providers (GitHub, Jira, Plane, or no provider)
+
+Write `docs/release_notes/{current_tag}.md`:
+1. Create `docs/release_notes/` directory if absent (silently).
+2. Write `release_body` as the file content (no YAML front matter).
+3. Emit: `✓ Release notes written: docs/release_notes/{current_tag}.md`
+
+### Step 10 — Summary output
+
+```
+Release notes for {current_tag}
+Range:   {previous_tag_or_ref} → {current_tag}
+Tickets: {total_resolved} resolved across {G} label groups
+Published: {GitLab Release: {current_tag} | docs/release_notes/{current_tag}.md}
+```
+
+### Config (optional)
+
+`.project/config.yaml` accepts an optional `release` key:
+
+```yaml
+release:
+  include_unlinked_commits: true   # default: true; set false to omit ### Other section
+```
+
+All other behaviour derives from existing config fields (`provider.name`, `gitlab_project_id`, `mcp_prefix`).
+
+### Edge Cases
+
+| Scenario | Behaviour |
+|---|---|
+| Not on a tag | Emit warning, stop (Step 1) |
+| No previous semver tag | Range from initial commit, emit notice (Step 2) |
+| Zero commits in range | Emit notice, stop (Step 3) |
+| All commits unlinked | Notes contain only `### Other` section |
+| Tracker MCP unavailable | Degrade: IDs without titles, continue (Step 5) |
+| `docs/release_notes/` absent | Create silently (Step 9) |
+| GitLab Release already exists | Emit notice, print body (Step 9) |

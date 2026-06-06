@@ -1,41 +1,41 @@
 ## Purpose
-Defines how the skill probes and caches provider capability flags at init time, handles mid-session capability failures, and communicates fallback strategies to the user.
+Defines how the skill verifies provider connectivity at init, probes and caches capability flags, handles mid-session failures, and communicates fallback strategies to the user.
 
 ## Requirements
 
-### Requirement: Skill probes provider capabilities via two-signal detection at init
-At init, the skill SHALL use two signals to determine capability support: (1) whether the MCP tool exists (ToolSearch), and (2) whether a safe read call to that tool returns 200 or 403.
+### Requirement: Skill verifies REST connectivity at init via a lightweight ping
+At init, after collecting REST credentials, the skill SHALL make a single lightweight REST call to verify the token and host are valid. On success, `rest_verified_at` is written to `.project/config.yaml`. On failure, the skill surfaces the error with setup instructions and halts.
 
-#### Scenario: ToolSearch miss triggers user prompt
-- **WHEN** `ToolSearch("mcp__plane__list_modules")` returns no results
-- **THEN** the skill cannot probe and asks the user whether epics are supported on their plan
+#### Scenario: Successful REST ping stores rest_verified_at
+- **WHEN** the REST ping returns a 2xx response during init
+- **THEN** the skill emits `REST connection verified ✓` and stores `rest_verified_at` as an ISO-8601 datetime in `.project/config.yaml`
+
+#### Scenario: Failed REST ping halts init with instructions
+- **WHEN** the REST ping returns a non-2xx response or network error
+- **THEN** the skill halts and outputs: `✗ Could not connect to {provider} REST API — check {token_env} and host URL`
+
+### Requirement: Capability flags are probed via REST at init and cached in .project/config.yaml
+The skill SHALL probe each capability flag using the provider REST API at init time. Results are written to `.project/config.yaml` under `provider.capabilities` with a `rest_verified_at` timestamp. Subsequent invocations read from cache.
 
 #### Scenario: 200 response marks capability as supported
-- **WHEN** `mcp__plane__list_cycles` is called and returns 200
-- **THEN** `capabilities.sprints` is set to `true` in `.project/config.yaml`
+- **WHEN** a REST capability probe returns 200
+- **THEN** the corresponding flag is set to `true` in `.project/config.yaml`
 
 #### Scenario: 403 response marks capability as unsupported
-- **WHEN** `mcp__plane__list_modules` is called and returns 403
-- **THEN** `capabilities.epics` is set to `false` in `.project/config.yaml`
-- **AND** the fallback strategy from `providers.json` is activated for epics
-
-### Requirement: Capability results are cached in .project/config.yaml after init
-The skill SHALL write probed capability flags to `.project/config.yaml` under `provider.capabilities` with a `probed_at` timestamp.
+- **WHEN** a REST capability probe returns 403
+- **THEN** the corresponding flag is set to `false` in `.project/config.yaml`
+- **AND** the fallback strategy from `providers.json` is activated
 
 #### Scenario: Subsequent invocations read from cache
-- **WHEN** `.project/config.yaml` exists with a recent `probed_at`
+- **WHEN** `.project/config.yaml` exists with `rest_verified_at` present
 - **THEN** the skill reads capabilities from cache without re-probing
 
-#### Scenario: Cache contains probed_at timestamp
-- **WHEN** init completes successfully
-- **THEN** `.project/config.yaml` contains `provider.capabilities.probed_at` as an ISO-8601 datetime
-
 ### Requirement: Unexpected 403 mid-session triggers lazy re-probe for that feature
-If a provider call returns 403 unexpectedly during normal operation, the skill SHALL re-probe that specific capability, update the cache, and retry the operation using the fallback strategy.
+If a provider call returns 403 unexpectedly during normal operation, the skill SHALL re-probe that specific capability via REST, update the cache, and retry the operation using the fallback strategy.
 
 #### Scenario: Mid-session epic creation 403 triggers label fallback
 - **WHEN** a ticket creation with `parent_id` returns 403 after init declared epics supported
-- **THEN** the skill re-probes epics, updates `config.yaml` to `false`, and retries using the label fallback
+- **THEN** the skill re-probes epics via REST, updates `config.yaml` to `false`, and retries using the label fallback
 - **AND** notifies the user: "Epic support not available, switched to label fallback"
 
 ### Requirement: Init asks project type and stack after provider confirmation
@@ -93,8 +93,8 @@ When the provider is GitLab, the skill SHALL probe the group-level iterations en
 - **THEN** `gitlab_edition: ce` is written to `.project/config.yaml`
 - **AND** `sprint_proxy: label` is set — CE treats 403 the same as 404 for this probe
 
-#### Scenario: Iterations tool absent triggers user prompt
-- **WHEN** `ToolSearch("mcp__gitlab__list_iterations")` returns no results during init
+#### Scenario: Iterations REST probe absent triggers user prompt
+- **WHEN** the REST iterations endpoint returns 404 for a reason unrelated to edition (e.g. no iterations created yet) and the response is ambiguous
 - **THEN** skill asks `"Could not detect GitLab edition. Is your instance EE Premium or Ultimate? [y/n]"`
 - **AND** sets `gitlab_edition: ee-premium` or `gitlab_edition: ce` based on the answer
 

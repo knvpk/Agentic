@@ -410,34 +410,36 @@ Always check `capabilities` in `.project/config.yaml` before using native API. I
 
 ---
 
-## Shared: GitLab Write Path Resolution
+## Shared: Provider Write Path Resolution
 
-For any operation that mutates an existing GitLab issue (state change, label add/remove, sprint label, milestone assign), use this resolution procedure instead of calling `mcp__gitlab__update_issue` directly.
+For any operation that mutates an issue (state change, label add/remove, sprint label, milestone assign), use this universal resolution procedure.
 
-**Step 1 — Lazy project ID fetch (if needed)**
+**Step 1 — Lazy project ID fetch for GitLab (if needed)**
 
-If `gitlab_project_id` is absent from `.project/config.yaml` and the write requires REST fallback:
+If provider is GitLab and `gitlab_project_id` is absent from `.project/config.yaml`:
 - Parse repo name from git remote; construct `{gitlab_group}/{repo_name}`
-- Call `mcp__gitlab__get_project` with the full path; store the numeric `id` as `gitlab_project_id` in config
+- Call `GET /api/v4/projects/{url-encoded path}` via REST; store the numeric `id` as `gitlab_project_id` in config
 
-**Step 2 — Resolve write path (in order)**
+**Step 2 — Resolve write path (REST → CLI → MCP)**
 
-1. `ToolSearch("mcp__gitlab__update_issue")` → if tool found, **use MCP path** (no notice needed)
-2. `which glab` exits 0 → **use glab CLI path**; emit: `ℹ Using glab CLI for GitLab write (MCP update_issue not available)`
-3. `GITLAB_TOKEN` is set → **use REST API path**; emit: `ℹ Using REST API for GitLab write (MCP update_issue not available)`
+Read `rest_config` and `cli_tool` from `providers.json` for the current provider. Before constructing any REST call, read `references/rest/{provider}.md` for the correct path patterns and auth format. If a REST call returns an unexpected 404 or auth error, consult the `docs` link in that file to verify the current path before retrying.
+
+1. **REST**: construct the appropriate `PUT`/`PATCH` call using `rest_config.base` + auth header. If the token env var is set and the call succeeds → done (no notice needed).
+2. **CLI**: if `cli_tool` is non-null, check `which {cli_tool}` exits 0 → use CLI; emit: `ℹ Using {cli_tool} CLI (REST unavailable)`
+3. **MCP**: resolve tool suffix from `tool_contracts.update_ticket`; call `mcp__{provider}__{suffix}`; emit: `ℹ Using MCP (REST and CLI unavailable)`
 4. All paths unavailable → **halt with error**:
    ```
-   ✗ Cannot write to GitLab issue — no write path available.
+   ✗ Cannot write to {Provider} issue — no write path available.
    Enable one of:
-     1. MCP:  mcp__gitlab__update_issue must be discoverable (check GitLab MCP server version)
-     2. CLI:  brew install glab  (or https://gitlab.com/gitlab-org/cli)
-     3. REST: set GITLAB_TOKEN env var (api scope)
+     1. REST: set {token_env} env var
+     2. CLI:  install {cli_tool}   (if applicable)
+     3. MCP:  configure the {provider} MCP server
    ```
 
 **Step 3 — Label-delta helper (for label-based writes)**
 
 When the write involves label changes (state transitions, sprint assignment):
-1. Call `mcp__gitlab__get_issue` to fetch the issue's current labels
+1. Fetch the issue's current labels via REST (`GET .../issues/{id}`)
 2. Identify the state label to remove: any label whose value matches a `state_mapping[*].label` entry in `providers.json`
 3. Compute `add_labels` and `remove_labels` as the delta; preserve all other labels
 
@@ -445,9 +447,9 @@ Then dispatch via the resolved path:
 
 | Path | State change | Label add/remove |
 |------|-------------|-----------------|
-| MCP  | `mcp__gitlab__update_issue` with `state_event: close\|reopen` + `add_labels` + `remove_labels` | same tool |
-| glab | `glab issue close/reopen` for state; `glab issue update --add-label X --remove-label Y` for labels | separate calls |
-| REST | `curl -X PUT .../issues/{iid} -d "state_event=close&add_labels=X&remove_labels=Y"` | same call |
+| REST | `PUT .../issues/{id}` with `state_event=close\|reopen&add_labels=X&remove_labels=Y` | same call |
+| CLI (glab) | `glab issue close/reopen` for state; `glab issue update --add-label X --remove-label Y` | separate calls |
+| MCP | `mcp__gitlab__update_issue` with `state_event` + `add_labels` + `remove_labels` | same tool |
 
 ---
 
@@ -675,103 +677,51 @@ Store as `project_type`: `mobile` | `web` | `api` | `microservices` | `generic`.
 | microservices | Repo structure? | separate-repos, monorepo | e.g. `separate-repos` |
 | generic | *(skip)* | — | *(omit from config)* |
 
-### Step 3 — ToolSearch probe (Signal 1) + MCP setup wizard
+### Step 3 — REST credential collection and verification
 
-Use ToolSearch to verify the MCP server is reachable:
+Read `rest_config` from `providers.json` for the detected provider.
+
+**Collect credentials:**
+
+For providers with a variable host (GitLab self-hosted, Jira, Plane self-hosted):
 ```
-ToolSearch("mcp__{provider}__")
+{Provider} host URL: [https://gitlab.company.com]
 ```
+For SaaS providers with a fixed base (GitHub, GitLab.com): skip host question.
 
-**If tools found** → MCP is configured, continue to Step 4.
+For each required token env var (from `rest_config.token_env` and `rest_config.email_env` if present):
+- Check environment: if already set → `Found {NAME} in environment ✓`
+- Not set → prompt (masked) → `export {NAME}="{value}"` → append to `~/.zshrc`
 
-**If no tools found** → launch setup wizard:
+**Jira extra**: Jira requires both `JIRA_EMAIL` and `JIRA_TOKEN`. Both must be collected.
 
-**Step A — Resolve endpoint URL**
+**Verify REST connection:**
 
-All four providers have official hosted HTTP MCPs. Present the default and offer a self-hosted override:
+Read `references/rest/{provider}.md` for the correct ping path and auth format. Construct a lightweight read call using `rest_config`:
+- GitHub: `GET /user`
+- GitLab: `GET /api/v4/user`
+- Jira: `GET /rest/api/3/myself`
+- Plane: `GET /api/v1/workspaces/`
 
+Execute via `curl` using the auth header from `rest_config.auth_header`. On success:
 ```
-{Provider} MCP is not configured.
-
-Official endpoint: {mcp_setup.default_url}
-  docs: {mcp_setup.docs}
-
-Use the default or a self-hosted instance?
-  1. Default  ({mcp_setup.default_url})
-  2. Self-hosted  ({mcp_setup.self_hosted_url_pattern or note})
-```
-
-- **Plane + Default**: URL is fixed `https://mcp.plane.so/http/api-key/mcp` — ask for API key → pass as `--header "x-api-key={key}"`
-- **Plane + Self-hosted**: ask for instance base URL → use `{base_url}/http/api-key/mcp` with same header
-- **GitHub/GitLab/Jira + Default**: use `default_url` as-is
-- **GitHub/GitLab/Jira + Self-hosted**: ask for instance URL, build URL from `self_hosted_url_pattern`
-
-**Step B — Resolve auth method**
-
-**GitLab env pre-check**: Before presenting any choice, if the provider is GitLab, read `mcp_setup.pat_env` (= `"GITLAB_TOKEN"`) and check whether that variable is set in the environment:
-- **Found** → emit `Found GITLAB_TOKEN in environment — using PAT auth ✓` and skip to the PAT install command directly (no question asked).
-- **Not found** → continue to the question below.
-
-Read `mcp_setup.auth_methods`. If only one → use it. If multiple → ask:
-
-```
-How should the MCP authenticate?
-  1. OAuth  — browser flow, recommended  (GitHub / GitLab / Jira)
-  2. PAT / API token  — for automation or CI
+REST connection verified ✓
 ```
 
-| Provider | OAuth command | Token command |
-|----------|--------------|---------------|
-| GitHub | `claude mcp add github -t http --url {url}` | append `--header "Authorization=Bearer {token}"` |
-| GitLab | `claude mcp add gitlab --scope project --transport http {url}` | append `--header "Authorization=Bearer {token}"` |
-| Jira | `claude mcp add jira --transport http {url}` | append `--header "Authorization=Basic {base64}"` |
-| Plane | `claude mcp add plane --transport http {url} --header "x-api-key={key}"` | API key in header |
-
-For **OAuth**: run the install command → output: "Open Claude and type `/mcp` to complete OAuth browser flow."
-For **PAT/token**: collect token (masked) → run install command with `--header` → no browser step needed.
-For **Plane**: URL is fixed (`https://mcp.plane.so/http/api-key/mcp`) — collect API key → pass as `--header "x-api-key={key}"`.
-
-For Jira API token: generate base64 → `echo -n "{email}:{token}" | base64` → embed in header.
-
-Then:
-
+On failure:
 ```
-Does your MCP server manage authentication centrally (SSO/service account)?
-  1. Yes — server handles auth, no token needed from me
-  2. No  — I need to provide credentials
+✗ Could not connect to {Provider} REST API.
+  Check {token_env} and host URL, then re-run init.
 ```
+Stop here on failure.
 
-**If server manages auth (option 1):**
-- Skip all `required_env` marked `skip_if_server_manages_auth: true`
-- Still collect any env vars NOT marked as skippable (e.g. `PLANE_WORKSPACE_SLUG`, `PLANE_PROJECT_ID`)
-
-**If client provides credentials (option 2):**
-- For each `required_env`: check if already in environment
-  - Found → "Found {name} in environment ✓"
-  - Not found → ask user (mask input) → append `export {name}="{value}"` to `~/.zshrc`
-
-Then run (always project-scoped — each project may use a different provider or workspace):
-```
-claude mcp add {provider} --scope project --transport http {url}
-```
-
-Output:
-```
-✓ MCP registered: {provider} → {url}
-✓ Credentials configured.
-```
-
-Store URL in `.project/config.yaml`:
+Store in `.project/config.yaml`:
 ```yaml
 provider:
-  name: github
-  mcp_url: https://mcp.company.com/github
-  mcp_prefix: mcp__github__
+  name: gitlab
+  host: https://gitlab.company.com   # omit for SaaS providers
+  rest_verified_at: {ISO-8601 datetime}
 ```
-
-Since HTTP transport takes effect immediately (no local process restart needed), continue directly to Step 4.
-
-If **user cancels** → print `references/{provider}.md` setup section and stop.
 
 ### Step 3b — GitLab-specific setup (GitLab only)
 
@@ -790,11 +740,10 @@ Store as `gitlab_group` in `.project/config.yaml`.
 
 **Edition detection**
 
-Call `ToolSearch("mcp__gitlab__list_iterations")`:
-- **Tool found** → call `mcp__gitlab__list_iterations` (scoped to the detected group):
-  - 200 → `gitlab_edition: ee-premium`, `sprint_proxy: iteration`
-  - 403 or 404 → `gitlab_edition: ce`, `sprint_proxy: label`, `sprint_label_scope: sprint`
-- **Tool not found** → ask: `"Could not detect GitLab edition. Is your instance EE Premium or Ultimate? [y/n]"`
+Call the REST iterations endpoint: `GET /api/v4/groups/{gitlab_group}/iterations`:
+- 200 → `gitlab_edition: ee-premium`, `sprint_proxy: iteration`
+- 403 or 404 → `gitlab_edition: ce`, `sprint_proxy: label`, `sprint_label_scope: sprint`
+- Network error or ambiguous → ask: `"Could not detect GitLab edition. Is your instance EE Premium or Ultimate? [y/n]"`
   - `y` → `gitlab_edition: ee-premium`, `sprint_proxy: iteration`
   - `n` → `gitlab_edition: ce`, `sprint_proxy: label`, `sprint_label_scope: sprint`
 
@@ -805,7 +754,7 @@ Store results in `.project/config.yaml`.
 If `gitlab_edition == "ce"`:
 
 First, if this is a re-probe (`init --probe`), check for existing sprint labels:
-- Call `mcp__gitlab__list_labels` with `search=sprint::`
+- Call `GET /api/v4/projects/{gitlab_project_id}/labels?search=sprint::` via REST
 - If labels found AND the stored `sprint_convention` differs from what the user is about to select → after selection, output:
   ```
   ⚠ Sprint labels already exist using {old_convention} convention — changing requires
@@ -828,7 +777,7 @@ Output: `⚠ Convention cannot be changed after the first sprint is created with
 
 Parse the repo name from the git remote (segment after the last `/` in the path, minus `.git` suffix). Construct full project path: `{gitlab_group}/{repo_name}`.
 
-Call `mcp__gitlab__get_project` with the full project path:
+Call `GET /api/v4/projects/{url-encoded project path}` via REST:
 - 200 → read the numeric `id` field; store `gitlab_project_id: <id>` in `.project/config.yaml`
 - Error → skip silently; `gitlab_project_id` will be fetched lazily on first write operation
 
@@ -836,22 +785,22 @@ Call `mcp__gitlab__get_project` with the full project path:
 
 If `gitlab_edition == "ce"`:
 1. Compute target path: `{gitlab_group}/pm-meta`
-2. Call `mcp__gitlab__get_project` with the target path:
+2. Call `GET /api/v4/projects/{url-encoded path}` via REST:
    - 200 → project exists; store `pm_meta_project: {gitlab_group}/pm-meta`
-   - 404 → call `mcp__gitlab__create_project` with `name: pm-meta`, `namespace: gitlab_group`:
+   - 404 → call `POST /api/v4/projects` with `name: pm-meta`, `namespace_id: {group_id}`:
      - Success → store `pm_meta_project: {gitlab_group}/pm-meta`
      - 403 → store `pm_meta_project: {current_project_path}`; output `⚠ Could not create pm-meta project — sprint metadata will be stored in the current project`
 
-### Step 4 — API probe (Signal 2)
+### Step 4 — REST capability probe
 
-For each feature, call a safe read endpoint. Map result to capability flag:
+For each feature, call the relevant REST read endpoint. Map result to capability flag:
 
-| Feature | Probe tool suffix | 200 → | 403/error → | tool missing → |
-|---------|-------------------|--------|-------------|----------------|
-| epics | `list_modules` / `list_epics` | true | false | ask user |
-| sprints | `list_cycles` / `list_milestones` / `list_boards` | true | false | ask user |
-| relationships | `list_issue_relations` / `list_issue_links` | true | false | ask user |
-| sub_issues | `list_issues` | true | false | assume true |
+| Feature | REST endpoint (suffix) | 200 → | 403/error → | ambiguous → |
+|---------|------------------------|--------|-------------|-------------|
+| epics | `/modules` / `/epics` | true | false | ask user |
+| sprints | `/cycles` / `/milestones` / `/board` | true | false | ask user |
+| relationships | `/issue-relations` / `/issue_links` | true | false | ask user |
+| sub_issues | `/issues` | true | false | assume true |
 
 For **GitLab**: use `gitlab_edition` from Step 3b to select `plan_variants.ce` or `plan_variants.ee-premium` from `providers.json` instead of probing sprint capability separately. The edition detection in Step 3b IS the sprint probe for GitLab.
 

@@ -1,37 +1,56 @@
 ## Purpose
-Defines the data-driven adapter contract that maps canonical skill operations to provider-specific MCP tools, state values, and fallback strategies via `references/providers.json`.
+Defines the data-driven adapter contract that maps canonical skill operations to provider-specific REST endpoints, CLI tools, MCP tools, state values, and fallback strategies via `references/providers.json`.
 
 ## Requirements
 
-### Requirement: providers.json declares tool contracts, state mapping, plan variants, and fallbacks per provider
-The `references/providers.json` file SHALL contain an entry for each supported provider (github, gitlab, jira, plane) with fields: `name`, `mcp_prefix`, `tool_contracts`, `state_mapping`, `plan_variants`, `fallbacks`, and optionally `write_fallbacks`. The `write_fallbacks` field, when present, declares an ordered list of fallback strategies for issue mutation operations when the primary MCP tool is unavailable.
+### Requirement: providers.json declares rest_config, cli_tool, tool contracts, state mapping, plan variants, and fallbacks per provider
+The `references/providers.json` file SHALL contain an entry for each supported provider (github, gitlab, jira, plane) with fields: `name`, `mcp_prefix`, `rest_config`, `cli_tool`, `tool_contracts`, `state_mapping`, `plan_variants`, and `fallbacks`. The `rest_config` field declares the REST API base URL pattern, token env var, and auth header. The `cli_tool` field names the CLI binary (or `null` if none exists for that provider).
 
 #### Scenario: Adding a new provider requires only a new providers.json entry
 - **WHEN** a new entry is added to `providers.json` with all required fields
 - **THEN** the skill supports that provider without any changes to `SKILL.md`
 
-#### Scenario: tool_contracts maps canonical operations to MCP tool suffixes
-- **WHEN** the skill needs to create a ticket in GitHub
+#### Scenario: rest_config provides base URL and auth for REST operations
+- **WHEN** the skill needs to update a ticket in GitLab via REST
+- **THEN** it reads `rest_config.base`, substitutes `{host}` from config, reads the token from `rest_config.token_env`, and constructs the auth header from `rest_config.auth_header`
+
+#### Scenario: cli_tool null causes CLI step to be skipped silently
+- **WHEN** `cli_tool` is `null` for Jira or Plane
+- **THEN** the skill skips step 2 of the resolution chain without error and tries MCP next
+
+#### Scenario: tool_contracts maps canonical operations to MCP tool suffixes (last-resort path)
+- **WHEN** both REST and CLI paths are unavailable and the skill falls back to MCP
 - **THEN** it resolves `tool_contracts.create_ticket` to `mcp__github__create_issue` and calls that tool
 
 #### Scenario: null tool_contract entry signals unsupported feature
 - **WHEN** `tool_contracts.sprint` is `null` for a provider
-- **THEN** the skill applies the declared fallback strategy instead of attempting an MCP call
+- **THEN** the skill applies the declared fallback strategy instead of attempting any call
 
-#### Scenario: write_fallbacks present for GitLab enables fallback chain
-- **WHEN** the skill resolves an update operation for GitLab and `write_fallbacks` is present
-- **THEN** the skill walks the fallback chain in declared order rather than calling `update_issue` directly
+### Requirement: All provider operations use REST → CLI → MCP resolution order
+For every operation (read and write), the skill SHALL attempt paths in this fixed order: (1) REST API using `rest_config`, (2) CLI tool named in `cli_tool` if non-null, (3) MCP tool via `tool_contracts`. The skill SHALL NOT vary this order per provider.
 
-### Requirement: Skill uses ToolSearch to verify MCP tool availability before calling
-The skill SHALL call `ToolSearch` with the provider's MCP prefix at init time and verify that required tools are discoverable before any ticket operation.
+#### Scenario: REST path succeeds — chain stops
+- **WHEN** a REST API call for ticket update returns 200
+- **THEN** the skill does not attempt CLI or MCP
 
-#### Scenario: Missing MCP server produces a clear setup message
-- **WHEN** no `mcp__github__*` tools are found via ToolSearch
-- **THEN** the skill outputs a message naming the required MCP server and how to add it, then halts
+#### Scenario: REST fails, CLI available — CLI used
+- **WHEN** REST call fails and `cli_tool` is non-null and the binary is on PATH
+- **THEN** the skill uses the CLI and emits a one-line notice
 
-#### Scenario: Partial MCP coverage degrades gracefully
-- **WHEN** `mcp__plane__list_cycles` exists but `mcp__plane__list_modules` does not
-- **THEN** the skill marks epics as unsupported and applies the label fallback without halting
+#### Scenario: REST fails, CLI absent, MCP available — MCP used
+- **WHEN** REST call fails, `cli_tool` is null or binary absent, and MCP tool is discoverable
+- **THEN** the skill uses the MCP tool and emits a one-line notice
+
+#### Scenario: All paths unavailable — error reported
+- **WHEN** REST, CLI, and MCP all fail or are unavailable
+- **THEN** the skill halts with a message listing all three options for enabling operations
+
+### Requirement: Skill reads rest_config.token_env at runtime; token is never stored in config files
+The skill SHALL read the auth token from the environment variable named in `rest_config.token_env` at the time of each REST call. The token value SHALL NOT be written to `.project/config.yaml` or any other file.
+
+#### Scenario: Token read from environment at call time
+- **WHEN** the skill makes a REST call for GitHub
+- **THEN** it reads `GITHUB_TOKEN` from the environment and injects it into the `Authorization` header
 
 ### Requirement: State mapping is bidirectional between canonical and provider states
 The skill SHALL translate canonical states to provider states when writing and provider states to canonical states when reading.

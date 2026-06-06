@@ -422,7 +422,7 @@ If provider is GitLab and `gitlab_project_id` is absent from `.project/config.ya
 
 **Step 2 — Resolve write path (REST → CLI → MCP)**
 
-Read `rest_config` and `cli_tool` from `providers.json` for the current provider.
+Read `rest_config` and `cli_tool` from `providers.json` for the current provider. Before constructing any REST call, read `references/rest/{provider}.md` for the correct path patterns and auth format. If a REST call returns an unexpected 404 or auth error, consult the `docs` link in that file to verify the current path before retrying.
 
 1. **REST**: construct the appropriate `PUT`/`PATCH` call using `rest_config.base` + auth header. If the token env var is set and the call succeeds → done (no notice needed).
 2. **CLI**: if `cli_tool` is non-null, check `which {cli_tool}` exits 0 → use CLI; emit: `ℹ Using {cli_tool} CLI (REST unavailable)`
@@ -697,7 +697,7 @@ For each required token env var (from `rest_config.token_env` and `rest_config.e
 
 **Verify REST connection:**
 
-Construct a lightweight read call using `rest_config`:
+Read `references/rest/{provider}.md` for the correct ping path and auth format. Construct a lightweight read call using `rest_config`:
 - GitHub: `GET /user`
 - GitLab: `GET /api/v4/user`
 - Jira: `GET /rest/api/3/myself`

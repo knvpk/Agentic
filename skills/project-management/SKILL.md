@@ -2733,8 +2733,8 @@ Before any git calls, extract an optional environment qualifier from the user's 
 
 | Input contains | `env_qualifier` |
 |---|---|
-| `uat`, `release candidate` | `uat` |
-| `prod`, `production` | `prod` |
+| `for uat`, `uat`, `release candidate` | `uat` |
+| `for prod`, `prod`, `production`, `for production` | `prod` |
 | *(none)* | `none` |
 
 Store as `env_qualifier`. Used in Step 7.

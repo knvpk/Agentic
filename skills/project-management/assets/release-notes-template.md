@@ -23,3 +23,16 @@
 - {{subject}}
 {{/each}}
 {{/if}}
+{{#if spec_changes}}
+---
+
+### Spec Changes
+
+{{#each spec_changes}}
+**{{capability}}**
+{{#each summary_lines}}
+- {{this}}
+{{/each}}
+
+{{/each}}
+{{/if}}

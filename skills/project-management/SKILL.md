@@ -2785,6 +2785,36 @@ Stop.
 
 Collect all lines as `commits` (list of `{hash, subject}`).
 
+### Step 3b — Collect OpenSpec spec changes (conditional)
+
+**OpenSpec detection**: check whether `openspec/specs/` exists in the repo root.
+
+- **Absent** → set `spec_changes = []` and skip this step entirely.
+- **Present** → run:
+  ```
+  git diff {previous_tag_or_ref}..{current_tag} -- openspec/specs/
+  ```
+
+Parse the diff output to build `spec_changes`: an array of `{capability, summary_lines[]}` objects, one per changed spec file. Derive `capability` from the file path — it is the directory name between `openspec/specs/` and `/spec.md` (e.g. `openspec/specs/auth-flow/spec.md` → `auth-flow`).
+
+For each changed spec file, read the `+` and `-` diff lines (excluding file header lines starting with `+++`/`---`) and synthesise human-readable summary bullets:
+
+| Diff signal | Summary bullet |
+|---|---|
+| `+` line adds a `## ` or `### ` heading | `Added section: {heading text}` |
+| `-` line removes a `## ` or `### ` heading | `Removed section: {heading text}` |
+| `+` line adds a `- The system SHALL` or `- SHALL` requirement | `New requirement: {requirement text, truncated to 120 chars}` |
+| `-` line removes a `- The system SHALL` or `- SHALL` requirement | `Removed requirement: {requirement text, truncated to 120 chars}` |
+| Net `+` lines > 20 with no structural markers above | `Expanded: {N} lines added` |
+| Net `-` lines > 20 with no structural markers above | `Reduced: {N} lines removed` |
+| Only minor changes (≤5 net lines, no structural markers) | `Minor edits` |
+
+Collect bullets as `summary_lines` for that capability. Omit capabilities where the only summary is `Minor edits` if there are 5 or more changed capabilities (de-noise for large releases).
+
+Sort `spec_changes` alphabetically by `capability`.
+
+If the diff produces no output (no spec files changed in this range): set `spec_changes = []`.
+
 ### Step 4 — Extract ticket references
 
 For each commit subject, apply all four patterns in order (all patterns applied to every subject):
@@ -2847,6 +2877,7 @@ Read the template from `assets/release-notes-template.md` (relative to this skil
 | `{{label_groups}}` | Array of `{name, count, plural, tickets[]}` — one entry per non-state label group, sorted alphabetically; omit groups with zero tickets |
 | `{{unlabelled_tickets}}` | Array of tickets with no qualifying label; omit `### Unlabelled` block if empty |
 | `{{other_commits}}` | Array of `{subject}` for unlinked commits |
+| `{{spec_changes}}` | Array of `{capability, summary_lines[]}` from Step 3b; empty array when not an OpenSpec project or no spec files changed |
 
 Rendering rules:
 - `{{#if plural}}` is true when count > 1 (for "tickets" vs "ticket" pluralisation).

@@ -2836,31 +2836,24 @@ Store as `header`.
 
 ### Step 8 — Build release body
 
-```markdown
-## {header}
+Read the template from `assets/release-notes-template.md` (relative to this skill file). Render it by substituting the variables below. The template uses Handlebars-style `{{variable}}` placeholders and `{{#if}}` / `{{#each}}` blocks.
 
-**Range**: {previous_tag_or_ref} → {current_tag}
-**Tickets**: {total_resolved} resolved
+| Variable | Value |
+|---|---|
+| `{{header}}` | Environment-framed title from Step 7 |
+| `{{previous_tag_or_ref}}` | Previous tag or initial commit SHA |
+| `{{current_tag}}` | Current tag name |
+| `{{total_resolved}}` | Count of tickets with a resolved title |
+| `{{label_groups}}` | Array of `{name, count, plural, tickets[]}` — one entry per non-state label group, sorted alphabetically; omit groups with zero tickets |
+| `{{unlabelled_tickets}}` | Array of tickets with no qualifying label; omit `### Unlabelled` block if empty |
+| `{{other_commits}}` | Array of `{subject}` for unlinked commits |
 
-### {Label Group} ({N} tickets)
-- {id}: {title}
-- {id}: {title}
+Rendering rules:
+- `{{#if plural}}` is true when count > 1 (for "tickets" vs "ticket" pluralisation).
+- Omit the `{{#if other_commits}}` block entirely if `unlinked_commits` is empty **or** if `release.include_unlinked_commits` is `false` in `.project/config.yaml`.
+- For tickets where title fetch failed: render `{{title}}` as `(title unavailable)`.
 
-### Unlabelled ({N} tickets)
-- {id}: {title}
-
-### Other
-- {commit subject}
-- {commit subject}
-```
-
-Rules:
-- Omit any label group that has zero tickets.
-- Omit `### Unlabelled` if that group is empty.
-- Omit `### Other` if `unlinked_commits` is empty **or** if `release.include_unlinked_commits` is `false` in `.project/config.yaml`.
-- For tickets with `title: null`: format as `- {id}: (title unavailable)`.
-
-Store the full body as `release_body`.
+Store the rendered output as `release_body`.
 
 ### Step 9 — Publish
 

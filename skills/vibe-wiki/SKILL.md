@@ -95,7 +95,6 @@ Create the following directories under `WIKI_ROOT`. Skip any that already exist 
   ideas/
   unorganized/
   raw/
-  .state/
 ```
 
 Report each directory: "Created: concepts/" or "Exists (skipped): concepts/".

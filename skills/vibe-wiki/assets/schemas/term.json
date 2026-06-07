@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "term.json",
+  "title": "Term Frontmatter",
+  "description": "Schema for the YAML frontmatter in every <terms_dir>/<id>.md file. Terms are single-definition vocabulary nodes.",
+  "type": "object",
+  "required": ["id", "name", "definition"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Snake_case ID matching the filename and used in [[wikilinks]]",
+      "pattern": "^[a-z0-9]+(_[a-z0-9]+)*$"
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable term name, capitalised as it appears in domain literature"
+    },
+    "definition": {
+      "type": "string",
+      "description": "One or two sentence plain-English definition — precise, no jargon in the definition itself"
+    },
+    "related_concepts": {
+      "type": "array",
+      "description": "[[wikilink]] references to concept nodes this term belongs to or is used by",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "default": []
+    },
+    "related_terms": {
+      "type": "array",
+      "description": "[[wikilink]] references to sibling or contrasting term nodes",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "default": []
+    },
+    "sources": {
+      "type": "array",
+      "description": "[[wikilink]] references to source nodes where this term was defined or introduced",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "default": []
+    },
+    "tags": {
+      "type": "array",
+      "description": "Free-form keywords for cross-cutting themes",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "default": []
+    }
+  }
+}

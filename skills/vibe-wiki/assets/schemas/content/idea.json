@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "content/idea.json",
+  "title": "Idea Body Sections",
+  "description": "Markdown body sections expected in every idea file. Not frontmatter.",
+  "type": "object",
+  "properties": {
+    "## Description": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "1–3 sentence explanation of what the idea is. Written as prose, not bullets."
+    },
+    "## Problem": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "What gap, pain point, or opportunity this idea addresses. Append bullets; never duplicate."
+    },
+    "## Approach": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "How this idea could be explored or implemented. Append bullets as thinking evolves; never duplicate."
+    },
+    "## Open Questions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "Unresolved questions that need answers before this idea can be validated or promoted. Append new questions; remove answered ones."
+    },
+    "## Notes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Free-form overflow notes, references, or scratchpad content. Append paragraphs; preserve existing text."
+    }
+  },
+  "additionalProperties": false
+}

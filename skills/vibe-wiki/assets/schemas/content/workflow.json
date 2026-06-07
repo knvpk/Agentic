@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "content/workflow.json",
+  "title": "Workflow Body Sections",
+  "description": "Markdown body sections expected in every workflow file. Not frontmatter.",
+  "type": "object",
+  "properties": {
+    "## Steps": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Numbered step-by-step procedure. Each step has a goal, optional code block, and a checkpoint. Append new steps; preserve existing steps."
+    },
+    "## From sources": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "One entry per source wikilink that informed this workflow, describing what it contributed. Append new entries; never duplicate."
+    },
+    "## Notes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Free-form overflow notes that don't fit a first-class section. Append paragraphs; preserve existing text."
+    }
+  },
+  "additionalProperties": false
+}

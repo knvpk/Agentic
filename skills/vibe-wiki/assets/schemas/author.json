@@ -1,0 +1,61 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "author.json",
+  "title": "Author Frontmatter",
+  "description": "Schema for the YAML frontmatter in every <authors_dir>/<id>.md file",
+  "type": "object",
+  "required": ["id", "name"],
+  "additionalProperties": false,
+  "x-body-sections": { "$ref": "content/author.json" },
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Snake_case ID used as the filename and in [[wikilinks]]",
+      "pattern": "^[a-z0-9]+(_[a-z0-9]+)*$"
+    },
+    "name": {
+      "type": "string",
+      "description": "Full name of the author"
+    },
+    "url": {
+      "description": "Author's homepage, blog, or profile URL",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "null" }
+      ]
+    },
+    "bio": {
+      "description": "One-sentence description of who they are",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "null" }
+      ]
+    },
+    "company": {
+      "description": "Organisation or company the author is affiliated with",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "null" }
+      ]
+    },
+    "expertise": {
+      "type": "array",
+      "description": "[[wikilink]] references to concept IDs this author covers well",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "sources": {
+      "type": "array",
+      "description": "[[wikilink]] references to source nodes from this author",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "verdict": {
+      "description": "User's overall recommendation — only set from explicit user opinion, never inferred",
+      "oneOf": [
+        { "type": "string", "enum": ["recommended", "neutral", "avoid"] },
+        { "type": "null" }
+      ]
+    }
+  }
+}

@@ -1,0 +1,20 @@
+wiki:
+  # Path to the wiki root directory (relative to the project root)
+  root: ./wiki
+
+  # Optional: paths to directories containing custom schema files (JSON Schema).
+  # Each *.json file defines the frontmatter and body structure for a custom node type.
+  # Run `wiki generate schema` to load them into the session.
+  # additional_schemas:
+  #   - ./schemas/custom
+  #   - /shared/org-schemas
+
+ingest:
+  # Maximum character length of content to process in one ingest (0 = no limit)
+  max_length: 0
+  # Skip user confirmation prompts (use with care)
+  auto_confirm: false
+
+obsidian:
+  # Emit Obsidian-compatible wikilinks and metadata
+  enabled: false

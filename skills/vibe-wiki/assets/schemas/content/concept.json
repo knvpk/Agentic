@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "content/concept.json",
+  "title": "Concept Body Sections",
+  "description": "Markdown body sections expected in every concept file. Not frontmatter — guides how the LLM structures content when creating or enriching a concept page.",
+  "type": "object",
+  "properties": {
+    "## Key Takeaways": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "Bullet list of the most important things to understand about this concept. Append new bullets; never duplicate."
+    },
+    "## From sources": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "One entry per source wikilink that contributed to this concept, describing what it added. Append new entries; never duplicate."
+    },
+    "## Notes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Free-form overflow notes that don't fit a first-class section. Append paragraphs; preserve existing text."
+    }
+  },
+  "additionalProperties": false
+}

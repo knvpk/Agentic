@@ -1,0 +1,78 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "idea.json",
+  "title": "Idea Frontmatter",
+  "description": "Schema for the YAML frontmatter in every <ideas_dir>/<id>/<id>.md file. Raw or evolving thoughts that may be promoted to a concept, workflow, or tool node.",
+  "type": "object",
+  "required": ["id", "title", "status", "created_at", "tags", "category"],
+  "additionalProperties": false,
+  "x-body-sections": { "$ref": "content/idea.json" },
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Snake_case ID matching the folder name under ideas_dir",
+      "pattern": "^[a-z0-9]+(_[a-z0-9]+)*$"
+    },
+    "title": {
+      "type": "string",
+      "description": "Short, punchy name for the idea"
+    },
+    "status": {
+      "type": "string",
+      "description": "Lifecycle stage of the idea",
+      "enum": ["raw", "exploring", "validated", "shelved", "promoted"]
+    },
+    "created_at": {
+      "type": "string",
+      "description": "ISO 8601 date when the idea was first captured",
+      "format": "date"
+    },
+    "promoted_to": {
+      "type": "string",
+      "description": "[[wikilink]] to the concept or workflow this idea became. Only set when status is 'promoted'."
+    },
+    "tags": {
+      "type": "array",
+      "description": "Free-form keywords for cross-cutting themes",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "category": {
+      "type": "string",
+      "description": "Broad category of the idea",
+      "enum": ["research", "tooling", "workflow", "concept", "other"]
+    },
+    "priority": {
+      "type": "string",
+      "description": "Triage priority",
+      "enum": ["low", "medium", "high"]
+    },
+    "related_concepts": {
+      "type": "array",
+      "description": "[[wikilink]] references to concept nodes this idea connects to",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "related_ideas": {
+      "type": "array",
+      "description": "[[wikilink]] references to other idea nodes",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "sources": {
+      "type": "array",
+      "description": "[[wikilink]] references to source nodes that inspired this idea",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "effort": {
+      "type": "string",
+      "description": "Rough size estimate to explore or implement this idea",
+      "enum": ["quick", "medium", "large"]
+    },
+    "motivation": {
+      "type": "string",
+      "description": "One sentence on why this idea is worth pursuing"
+    }
+  }
+}

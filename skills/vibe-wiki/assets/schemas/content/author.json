@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "content/author.json",
+  "title": "Author Body Sections",
+  "description": "Markdown body sections expected in every author file. Not frontmatter.",
+  "type": "object",
+  "properties": {
+    "## Notes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Free-form opinion or observations recorded verbatim from the user. Append paragraphs; preserve existing text."
+    }
+  },
+  "additionalProperties": false
+}

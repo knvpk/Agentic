@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "concept.json",
+  "title": "Concept Frontmatter",
+  "description": "Schema for the YAML frontmatter in every <concepts_dir>/<id>/<id>.md file.",
+  "type": "object",
+  "required": ["id", "name", "description", "related_concepts", "tags", "sources"],
+  "additionalProperties": false,
+  "x-body-sections": { "$ref": "content/concept.json" },
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Snake_case ID matching the folder name under concepts_dir and the entry in index.md",
+      "pattern": "^[a-z0-9]+(_[a-z0-9]+)*$"
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable concept name"
+    },
+    "description": {
+      "type": "string",
+      "description": "One-sentence plain-English summary of what this concept is"
+    },
+    "related_concepts": {
+      "type": "array",
+      "description": "[[wikilink]] references to closely related concept IDs — prerequisites, follow-ons, or siblings",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "tags": {
+      "type": "array",
+      "description": "Free-form keywords for cross-cutting themes",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "sources": {
+      "type": "array",
+      "description": "[[wikilink]] references to source nodes that have informed this concept",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    }
+  }
+}

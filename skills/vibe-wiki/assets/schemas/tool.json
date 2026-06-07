@@ -1,0 +1,134 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "tool.json",
+  "title": "Tool Frontmatter",
+  "description": "Schema for the YAML frontmatter in every <tools_dir>/<id>.md file",
+  "type": "object",
+  "required": ["id", "name", "category"],
+  "additionalProperties": false,
+  "x-body-sections": { "$ref": "content/tool.json" },
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Snake_case ID used as the filename and in [[wikilinks]]",
+      "pattern": "^[a-z0-9]+(_[a-z0-9]+)*$"
+    },
+    "name": {
+      "type": "string",
+      "description": "Display name of the tool, library, or framework"
+    },
+    "category": {
+      "type": "string",
+      "description": "Kind of tool",
+      "enum": ["framework", "library", "service", "cli", "database", "other"]
+    },
+    "url": {
+      "description": "Official homepage or docs URL",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "null" }
+      ]
+    },
+    "sources": {
+      "type": "array",
+      "description": "All known URLs for this tool — repo, docs, blog, etc.",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "language": {
+      "description": "Primary programming language(s) the tool is written in or targets",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "array", "items": { "type": "string" }, "uniqueItems": true, "minItems": 1 },
+        { "type": "null" }
+      ]
+    },
+    "docker": {
+      "description": "Whether an official Docker image or docker-compose setup is available",
+      "oneOf": [
+        { "type": "boolean" },
+        { "type": "null" }
+      ]
+    },
+    "cloud": {
+      "description": "Whether a managed cloud / hosted service is available",
+      "oneOf": [
+        { "type": "boolean" },
+        { "type": "null" }
+      ]
+    },
+    "platform": {
+      "description": "Runtime platform(s) the tool supports",
+      "oneOf": [
+        {
+          "type": "array",
+          "items": { "type": "string", "enum": ["linux", "macos", "windows", "web", "mobile", "wasm", "any"] },
+          "uniqueItems": true,
+          "minItems": 1
+        },
+        { "type": "null" }
+      ]
+    },
+    "license": {
+      "description": "SPDX license identifier or 'proprietary'",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "null" }
+      ]
+    },
+    "version": {
+      "description": "Version recorded at time of last_checked — snapshot, not live",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "null" }
+      ]
+    },
+    "last_checked": {
+      "description": "ISO date when this node's metadata was last verified (YYYY-MM-DD)",
+      "oneOf": [
+        { "type": "string", "format": "date" },
+        { "type": "null" }
+      ]
+    },
+    "maturity": {
+      "description": "Lifecycle stage of the tool",
+      "oneOf": [
+        { "type": "string", "enum": ["experimental", "stable", "mature", "deprecated"] },
+        { "type": "null" }
+      ]
+    },
+    "install": {
+      "description": "One-line install command (e.g. 'pip install torch')",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "null" }
+      ]
+    },
+    "alternatives": {
+      "type": "array",
+      "description": "[[wikilink]] references to similar or competing tool nodes",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "tags": {
+      "type": "array",
+      "description": "Free-form keywords for cross-cutting themes",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "description": {
+      "description": "One-to-two sentence description of what the tool does",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "null" }
+      ]
+    },
+    "verdict": {
+      "description": "User's recommendation — only set from explicit user opinion, never inferred",
+      "oneOf": [
+        { "type": "string", "enum": ["recommended", "neutral", "avoid"] },
+        { "type": "null" }
+      ]
+    }
+  }
+}

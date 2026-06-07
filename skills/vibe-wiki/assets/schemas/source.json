@@ -1,0 +1,77 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "source.json",
+  "title": "Source Frontmatter",
+  "description": "Schema for the YAML frontmatter in every <sources_dir>/<id>.md file",
+  "type": "object",
+  "required": ["id", "type", "title", "concepts", "date_ingested"],
+  "additionalProperties": false,
+  "x-body-sections": { "$ref": "content/source.json" },
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Snake_case ID used as the filename and in [[wikilinks]]",
+      "pattern": "^[a-z0-9]+(_[a-z0-9]+)*$"
+    },
+    "type": {
+      "type": "string",
+      "description": "Kind of source",
+      "enum": ["article", "paper", "video", "book", "docs", "talk", "other"]
+    },
+    "title": {
+      "type": "string",
+      "description": "Full title of the source"
+    },
+    "url": {
+      "description": "Canonical URL for the source (null for local file ingest)",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "null" }
+      ]
+    },
+    "filename": {
+      "description": "Filename under raw/ if ingested from a local file (null for URL ingest)",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "null" }
+      ]
+    },
+    "author": {
+      "description": "[[wikilink]] to the author node, or null if unknown",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "null" }
+      ]
+    },
+    "concepts": {
+      "type": "array",
+      "description": "[[wikilink]] references to concept nodes this source covers",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "date_ingested": {
+      "type": "string",
+      "description": "ISO date when this source was added to the wiki (YYYY-MM-DD)",
+      "format": "date"
+    },
+    "terms": {
+      "type": "array",
+      "description": "[[wikilink]] references to term nodes defined or introduced in this source",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "tags": {
+      "type": "array",
+      "description": "Free-form keywords",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "publication_date": {
+      "description": "Date the source was published (YYYY-MM-DD or YYYY)",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "null" }
+      ]
+    }
+  }
+}

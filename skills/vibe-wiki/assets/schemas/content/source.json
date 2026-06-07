@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "content/source.json",
+  "title": "Source Body Sections",
+  "description": "Markdown body sections expected in every source file. Not frontmatter — guides how the LLM structures content when creating or enriching a source page.",
+  "type": "object",
+  "properties": {
+    "## Summary": {
+      "type": "string",
+      "description": "One-paragraph summary of what the source covers and its key contribution. Write once on creation; do not overwrite."
+    },
+    "## Key concepts covered": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "Bullet list of concepts this source introduces or deepens, with a one-line description per concept. Append new entries; never duplicate."
+    },
+    "## Notes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Free-form overflow notes that don't fit a first-class section. Append paragraphs; preserve existing text."
+    }
+  },
+  "additionalProperties": false
+}

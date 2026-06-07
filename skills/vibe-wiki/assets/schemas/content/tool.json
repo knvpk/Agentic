@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "content/tool.json",
+  "title": "Tool Body Sections",
+  "description": "Markdown body sections expected in every tool file. Not frontmatter.",
+  "type": "object",
+  "properties": {
+    "## Pros": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "Bullet list of advantages noted by the user. Only populated from explicit user opinion, never inferred. Append new bullets; never duplicate."
+    },
+    "## Cons": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "Bullet list of drawbacks noted by the user. Only populated from explicit user opinion, never inferred. Append new bullets; never duplicate."
+    },
+    "## Notes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Free-form opinion or observations recorded verbatim from the user. Append paragraphs; preserve existing text."
+    }
+  },
+  "additionalProperties": false
+}

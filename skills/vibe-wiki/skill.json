@@ -1,5 +1,5 @@
 {
-  "name": "vibe_wiki",
+  "name": "vibe-wiki",
   "version": "1.0.0",
   "description": "Build and maintain a persistent, compounding wiki from URLs and local files.",
   "tags": ["wiki", "knowledge-management", "rag", "notes", "second-brain"],
@@ -8,7 +8,7 @@
     "assets": {
       "schemas": "assets/schemas/",
       "starter": "assets/starter/",
-      "config_template": "assets/vibe_wiki.template.yaml"
+      "config_template": "assets/vibe-wiki.template.yaml"
     }
   },
   "commands": ["wiki init", "wiki ingest", "wiki query", "wiki lint", "wiki help", "wiki generate schema"]

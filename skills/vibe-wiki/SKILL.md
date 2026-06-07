@@ -1,13 +1,13 @@
 ---
-name: vibe_wiki
+name: vibe-wiki
 version: 1.0.0
 description: >
   Build and maintain a persistent, compounding wiki from URLs and local files. Commands: wiki
   init, wiki ingest, wiki query, wiki lint, wiki help, wiki generate schema.
 compatibility: >
-  Requires vibe_wiki.yaml in the project root. Run `wiki init` to set up a new wiki.
+  Requires vibe-wiki.yaml in the project root. Run `wiki init` to set up a new wiki.
 triggers:
-  - /vibe_wiki
+  - /vibe-wiki
   - wiki init
   - wiki ingest
   - wiki query
@@ -16,7 +16,7 @@ triggers:
   - wiki generate schema
 ---
 
-# vibe_wiki
+# vibe-wiki
 
 Ingest sources, query accumulated knowledge, keep the graph healthy.
 
@@ -39,11 +39,11 @@ Run this routine at the start of every session before executing any wiki command
 
 ### S1 — Locate config
 
-Look for `vibe_wiki.yaml` in the project root (working directory).
+Look for `vibe-wiki.yaml` in the project root (working directory).
 
 **If not found:**
-> `vibe_wiki.yaml` not found.
-> Copy `{SKILL_DIR}/assets/vibe_wiki.template.yaml` to the project root as `vibe_wiki.yaml`, edit the `wiki.root` key, then re-invoke.
+> `vibe-wiki.yaml` not found.
+> Copy `{SKILL_DIR}/assets/vibe-wiki.template.yaml` to the project root as `vibe-wiki.yaml`, edit the `wiki.root` key, then re-invoke.
 
 Stop. Do not proceed further.
 
@@ -400,12 +400,12 @@ Lint complete
 Print the command reference. Usage: `wiki help` or `wiki commands`
 
 ```
-vibe_wiki commands
+vibe-wiki commands
 ──────────────────────────────────────────────────────
 
 wiki init
   Initialise a new wiki. Creates directory structure and copies starter
-  files (index.md, log.md) to wiki.root. Requires vibe_wiki.yaml.
+  files (index.md, log.md) to wiki.root. Requires vibe-wiki.yaml.
 
 wiki ingest <url-or-filename>
   Ingest a source into the wiki. <url-or-filename> can be:
@@ -426,15 +426,16 @@ wiki lint
   Appends a summary entry to log.md.
 
 wiki generate schema
-  Registers additional schema files into {wiki.root}/.schemas/. Reads
-  wiki.additional_schemas from vibe_wiki.yaml — each entry is a
-  directory of *.json schema files to copy in.
+  Loads custom node-type schemas into the session. Reads
+  wiki.additional_schemas from vibe-wiki.yaml — each entry is a
+  directory of *.json schema files defining frontmatter and body
+  sections for custom node types.
 
 wiki help | wiki commands
   Show this command reference.
 
 ──────────────────────────────────────────────────────
-Config: vibe_wiki.yaml (project root)
+Config: vibe-wiki.yaml (project root)
 ```
 
 ---
@@ -445,10 +446,10 @@ Generate custom schema files for additional node types. Usage: `wiki generate sc
 
 ### GS1 — Read config
 
-Read `wiki.additional_schemas` from `vibe_wiki.yaml`. Each entry is a path to a directory containing pre-written `*.json` schema files. These schemas follow the same structure as the built-in schemas in `{SKILL_DIR}/assets/schemas/` — they define the frontmatter fields and body sections for custom node types.
+Read `wiki.additional_schemas` from `vibe-wiki.yaml`. Each entry is a path to a directory containing pre-written `*.json` schema files. These schemas follow the same structure as the built-in schemas in `{SKILL_DIR}/assets/schemas/` — they define the frontmatter fields and body sections for custom node types.
 
 If the key is absent or empty:
-> No additional schemas configured. Add directory paths under `wiki.additional_schemas` in vibe_wiki.yaml.
+> No additional schemas configured. Add directory paths under `wiki.additional_schemas` in vibe-wiki.yaml.
 
 Stop.
 

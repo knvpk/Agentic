@@ -29,14 +29,15 @@ claude mcp add plane --scope project --transport http https://plane.company.com/
 
 | Feature | Free | Pro / Business |
 |---------|------|----------------|
-| Cycles (sprints) | ✓ | ✓ |
-| Modules (epics) | ✗ | ✓ |
+| Cycles (sprints) | ✓ (1 active at a time) | ✓ (unlimited active) |
+| Modules | ✓ | ✓ |
+| Epics (work item type) | ✗ | ✓ |
 | Blocking relations | ✓ | ✓ |
 | relates-to | ✓ | ✓ |
 | Sub-issues | ✓ | ✓ |
 | Custom states | ✓ | ✓ |
 
-The skill probes `list_modules` at init. If it returns 403 → free plan, activate label fallback for epics.
+The skill probes `list_modules` at init. If it returns 200 → Modules available (all plans). The skill separately probes for the Epic work item type (Pro-only); if unavailable, label fallback is activated. On free plan, `active_cycles_limit: 1` is stored in config.
 
 ## Sprint Model (Cycles)
 

@@ -807,6 +807,26 @@ For **GitLab**: use `gitlab_edition` from Step 3b to select `plan_variants.ce` o
 When asking the user (ambiguous probe):
 > "Couldn't determine whether your {Provider} workspace supports {feature}. Is it available on your plan? [y/n]"
 
+**Plane extra — state UUID resolution**
+
+If `provider.name == "plane"`, call `GET /api/v1/workspaces/{slug}/projects/{project_id}/states/` via REST (using `X-API-Key` auth header), or `mcp__plane__list_states` if REST is unavailable. For each returned state, reverse-map its `name` against `state_mapping` `state_name` values to find the matching canonical state. Build a map and store in `.project/config.yaml`:
+
+```yaml
+plane_state_ids:
+  backlog: "<uuid-of-Backlog-state>"
+  todo: "<uuid-of-Unstarted-state>"
+  in-progress: "<uuid-of-In Progress-state>"
+  in-review: "<uuid-of-in-review-label-state>"
+  done: "<uuid-of-Done-state>"
+```
+
+If a canonical state has no matching Plane state name, leave its value as `null` and warn:
+```
+⚠ Could not map canonical state '<state>' to a Plane state — check your project's state configuration in Plane.
+```
+
+Output: `✓ Plane state IDs resolved` or list any unmapped states.
+
 ### Step 4.5 — Validate assembled config
 
 Assemble the full config object in memory from all values collected in Steps 2–4. Validate it against `references/config.schema.json`.
@@ -894,6 +914,11 @@ For each capability that is false, print one line:
 **GitLab CE exception**: do NOT print the sprint proxy warning above. Instead print:
 ```
 ℹ  GitLab CE — sprints use scoped labels (sprint::*). Convention: {sprint_convention}. Metadata: {pm_meta_project}.
+```
+
+**Plane exception**: if `plane_state_ids` has any `null` entries, print:
+```
+⚠  Some canonical states could not be mapped to Plane states — state transitions for those states will use MCP only.
 ```
 
 ### Step 9 — Detect sibling repo doc sources
@@ -2202,13 +2227,17 @@ Reverse-map the raw provider state to canonical state via `state_mapping`:
 
 | Canonical state | Action |
 |---|---|
-| `todo` | Ask: "Move TICK-<id> to in-progress? [y/n]" → on Y run **WIP Limit Check** (below), then call `update_ticket` translating via `state_mapping` |
+| `todo` | Ask: "Move TICK-<id> to in-progress? [y/n]" → on Y run **WIP Limit Check** (below), then call `update_ticket` via the provider-specific path (see Step 4 provider branching below) |
 | `in-progress` | Silent no-op — already started (no WIP check needed — slot already occupied) |
-| `backlog` | Warn: "TICK-<id> is in backlog and not assigned to the active sprint. Continue anyway? [y/n]" |
+| `backlog` | Ask: "TICK-<id> is in backlog (not assigned to the active sprint). Move to in-progress? [y/n]" → on Y run **WIP Limit Check**, then call `update_ticket` via the provider-specific path (see Step 4 provider branching below); on N proceed to Step 5 without transition |
 | `in-review` or `done` | Warn: "TICK-<id> is already `<state>` — continuing in exploration mode." |
 | `blocked` | Warn: "TICK-<id> is blocked. Note the blocker before exploring." |
 
-**WIP Limit Check in start mode**: apply the same **Shared: WIP Limit Check** logic defined in `ticket update`. If user answers `n` to the WIP confirmation, output `Transition cancelled — continuing in exploration mode (ticket stays in todo).` and proceed to Step 5 without the state change. The `--no-branch` flag does NOT bypass the WIP check.
+**WIP Limit Check in start mode**: apply the same **Shared: WIP Limit Check** logic defined in `ticket update`. If user answers `n` to the WIP confirmation, output `Transition cancelled — continuing in exploration mode (ticket stays in current state).` and proceed to Step 5 without the state change. The `--no-branch` flag does NOT bypass the WIP check.
+
+**Provider-specific transition call** (for todo→in-progress and backlog→in-progress transitions):
+- **GitHub, Jira, Plane**: use **Shared: Provider Write Path Resolution** to call `update_ticket` with the translated state from `state_mapping`.
+- **GitLab**: use **Shared: Provider Write Path Resolution** + label-delta helper (same as `ticket update`) to add the new state label and remove the previous state label.
 
 ### Step 5 — Branch creation
 

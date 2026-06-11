@@ -2554,38 +2554,80 @@ If `related_refs` non-empty (different from primary `id`):
 
 ### sync → capture
 
-Post a single conclusion from the current explore session to the linked ticket.
+Post a session delta to the linked ticket — capturing what changed from the original plan, why, and what was decided. Only captures when something meaningful changed.
 
-**Input**: conclusion text passed as argument, or extracted from the most recent exchange in conversation.
+**Input**: triggered by "capture this", "capture", "sync capture", or "post this decision".
 
-#### Step 1 — Find active change with linked_issue
+#### Step 0 — Resolve active change and linked_issue
 
-Scan `openspec/changes/` (excluding `archive/`) for `.openspec.yaml` files containing a `linked_issue` block. Pick the most recently created (by `created` field).
+Scan `openspec/changes/` (excluding `archive/`) for `.openspec.yaml` files. Pick the most recently created (by `created` field).
 
-If none with `linked_issue`: offer to write conclusion to `openspec/changes/<name>/notes.md` instead (append, create if absent).
+- If no active change: output `No active change found — nothing to capture.` and stop.
+- If active change has no `linked_issue`: offer to write to `openspec/changes/<name>/notes.md` instead (append, create if absent). Proceed to Step 2 with notes.md as target.
+- If active change has `linked_issue`: proceed to Step 1.
 
-If no active change at all: output `No active change found — conclusion not saved.` and stop.
+#### Step 1 — Gate: did anything meaningful change?
 
-#### Step 2 — Draft and confirm
+**Detect project type**: SDD project if `openspec/` or `spec-kit/` exists at repo root. Otherwise code-first.
 
-Draft:
+**SDD gate — spec diff**: Check for delta specs at `openspec/changes/<name>/specs/`.
+- Directory exists and contains at least one `.md` file → proceed to Step 2.
+- Directory absent or empty → go to Override Prompt.
+
+**Code-first gate — LLM divergence judge**: Fetch linked ticket body via provider read tool. If fetch fails, skip judge and proceed to Step 2 with a note that original context was unavailable.
+
+Judge over the ticket body (original intent) and the full current session conversation:
+> "Does this session contain decisions, scope changes, or approach shifts that differ meaningfully from the original ticket context?"
+
+Output: Yes/No + one-sentence reason.
+- Divergence detected → proceed to Step 2.
+- No divergence detected → go to Override Prompt.
+
+**Override Prompt**: Use **AskUserQuestion**:
+> "Nothing significant looks different from the original ticket: `<judge reason>`. Capture anyway?"
+
+Options: `Yes, capture it` | `Skip`
+- `Yes`: proceed to Step 2 with gate-overridden flag.
+- `Skip`: stop silently.
+
+#### Step 2 — Draft delta note
+
+Synthesise across the **full current session** (not just the last exchange).
+
 ```markdown
-**Explore note — <change-name>**
+**Session update — <change-name>**
 
-<conclusion text>
+**What changed from the original plan:**
+- <bullet: divergence 1>
+- <bullet: divergence 2>
+
+**Why:**
+<brief reasoning drawn from session>
+
+**Final approach:**
+<what was decided>
 ```
+
+If gate was overridden and nothing genuinely diverged, use minimal format:
+```markdown
+**Session note — <change-name>**
+
+<brief summary of session conclusion>
+```
+
+#### Step 3 — Post
 
 Show preview. Use **AskUserQuestion**:
 > "Post this to <provider> #<id>?"
 
 Options: `Post it` | `Edit first` | `Skip`
 
-#### Step 3 — Post
+On `Edit first`: show draft as editable text, re-confirm.
 
 Use same provider routing table as sync → archive.
 
 On success: `✓ Posted to #<id>.`
-On failure: print text with `⚠ Could not post — copy above to post manually.`
+On failure: print draft with `⚠ Could not post — copy above to post manually.`
 
 ---
 

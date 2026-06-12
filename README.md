@@ -1,14 +1,12 @@
 ## Agentic
 
-Reusable tools, workflows, prompts, and architectures needed for Agentic AI development.
+Reusable tools, workflows, prompts, and architectures for Agentic AI development.
 
-### Resources
+### Skills
 
-1. Skills
-    1. docker-modulat-stack
-    2. project-management
-2. Coming soon...
-
-### Install
-
-1. Skills: `npx skills add knvpk/Agentic --skill {skill_name}`
+| Skill | Description | Install |
+|-------|-------------|---------|
+| [docker-modular-stack](skills/docker-modular-stack) | Define, scaffold, and lint Docker services for any project | `npx skills add knvpk/Agentic --skill docker-modular-stack` |
+| [project-management](skills/project-management) | Provider-agnostic PM — tickets, sprints, docs, standups across GitHub/GitLab/Jira/Plane | `npx skills add knvpk/Agentic --skill project-management` |
+| [issue-explore](skills/issue-explore) | Fetch any issue (GitHub/GitLab/Jira/Plane) and load it into an explore session | `npx skills add knvpk/Agentic --skill issue-explore` |
+| [vibe-wiki](skills/vibe-wiki) | Build and maintain a persistent, compounding wiki from URLs and local files | `npx skills add knvpk/Agentic --skill vibe-wiki` |

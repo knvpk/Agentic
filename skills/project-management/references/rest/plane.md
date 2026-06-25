@@ -5,7 +5,7 @@
 | Field | Value |
 |-------|-------|
 | Token env | `PLANE_TOKEN` |
-| Auth header | `X-Api-Key: {token}` |
+| Auth header | `X-API-Key: {token}` |
 | Base URL | `https://api.plane.so/api/v1` (self-hosted: `{host}/api/v1`) |
 | Host env | `PLANE_URL` (set for self-hosted instances) |
 
@@ -32,6 +32,13 @@ Both appear in every issue/label/cycle/module path.
 | list_cycles | GET | `/api/v1/workspaces/{slug}/projects/{project_id}/cycles/` |
 | create_cycle | POST | `/api/v1/workspaces/{slug}/projects/{project_id}/cycles/` |
 | list_modules | GET | `/api/v1/workspaces/{slug}/projects/{project_id}/modules/` |
+| list_states | GET | `/api/v1/workspaces/{slug}/projects/{project_id}/states/` |
+
+## State UUID Resolution
+
+The `state` field in `PATCH .../issues/{issue_id}/` accepts a **UUID**, not a state name.
+Resolve state names to UUIDs at init by calling `list_states` and caching the result
+in `.project/config.yaml` as `plane_state_ids` (canonical → UUID map).
 
 ## Docs
 

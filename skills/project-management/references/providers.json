@@ -377,9 +377,11 @@
         "create_epic":        "create_module",
         "list_epics":         "list_modules",
         "create_relation":    "create_issue_relation",
-        "get_relation":       "list_issue_relations"
+        "get_relation":       "list_issue_relations",
+        "list_states":        "list_states"
       },
       "state_mapping": {
+        "_note": "state_name values are used for display and init-time UUID resolution only. REST calls use UUIDs from plane_state_ids in .project/config.yaml. MCP calls may accept state_name directly.",
         "backlog":     { "state_name": "Backlog" },
         "todo":        { "state_name": "Unstarted" },
         "in-progress": { "state_name": "In Progress" },
@@ -398,6 +400,9 @@
       "plan_variants": {
         "free": {
           "epics": false,
+          "_epics_note": "epics=false means the Plane Pro 'Epic' work item type is unavailable. Modules (grouping containers) ARE available on free — use create_module for module epics.",
+          "modules": true,
+          "active_cycles_limit": 1,
           "sprints": true,
           "sprint_proxy": null,
           "milestones": false,
@@ -406,6 +411,8 @@
         },
         "pro": {
           "epics": true,
+          "modules": true,
+          "active_cycles_limit": null,
           "sprints": true,
           "sprint_proxy": null,
           "milestones": false,
@@ -430,7 +437,7 @@
         "host_env": "PLANE_URL",
         "host_default": "https://api.plane.so",
         "token_env": "PLANE_TOKEN",
-        "auth_header": "X-Api-Key: {token}"
+        "auth_header": "X-API-Key: {token}"
       },
       "cli_tool": null,
       "mcp_setup": {

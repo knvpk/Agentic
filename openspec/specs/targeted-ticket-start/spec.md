@@ -44,9 +44,40 @@ If the fetched ticket is in the `todo` state, the skill SHALL ask the user once 
 - **WHEN** ticket state is already `in-progress`
 - **THEN** skill skips the state transition prompt and continues silently
 
-#### Scenario: backlog ticket triggers a warning
+#### Scenario: backlog ticket prompts for transition with sprint context
 - **WHEN** ticket state is `backlog`
-- **THEN** skill warns: "TICK-42 is in backlog and not assigned to the active sprint. Continue anyway? [y/n]"
+- **THEN** skill asks: "TICK-42 is in backlog (not assigned to the active sprint). Move to in-progress? [y/n]"
+
+#### Scenario: backlog transition confirmed — WIP check runs then state is updated
+- **WHEN** ticket state is `backlog` and user answers `y` to the transition prompt
+- **THEN** skill runs the WIP Limit Check; if check passes (or no wip_limit is set), skill calls `update_ticket` to transition the ticket to `in-progress` via the provider-specific path
+
+#### Scenario: backlog transition declined — continues without state change
+- **WHEN** ticket state is `backlog` and user answers `n`
+- **THEN** skill outputs `Transition cancelled — continuing in exploration mode (ticket stays in current state).` and proceeds to branch creation without any state change
+
+#### Scenario: WIP check applied on backlog transition too
+- **WHEN** ticket state is `backlog`, user confirms transition, and wip_limit would be exceeded
+- **THEN** skill shows the WIP warning and asks `Continue? [y/n]` before calling the provider — same as for todo→in-progress
+
+### Requirement: start mode uses provider-specific write path and label-delta for state transitions
+Both the `todo` and `backlog` transition paths SHALL use provider-specific dispatch when calling `update_ticket`.
+
+#### Scenario: GitLab in-progress transition removes old state label
+- **WHEN** a GitLab ticket with the `To Do` label is transitioned to `in-progress` via start mode
+- **THEN** skill uses the label-delta helper to add the `In Progress` label AND remove the `To Do` label in the same call — not just add the new label
+
+#### Scenario: GitHub in-progress transition removes old state label
+- **WHEN** a GitHub ticket with the `todo` label is transitioned to `in-progress` via start mode
+- **THEN** skill uses the label-delta helper to add the `in-progress` label AND remove the `todo` label
+
+#### Scenario: Plane in-progress transition uses state UUID
+- **WHEN** a Plane ticket is transitioned to `in-progress` via start mode
+- **THEN** skill reads the UUID for `in-progress` from `plane_state_ids` in `.project/config.yaml` and passes it as the `state` field in the `update_issue` call
+
+#### Scenario: Jira in-progress transition uses transition name directly
+- **WHEN** a Jira ticket is transitioned to `in-progress` via start mode
+- **THEN** skill calls `update_ticket` with the transition name `In Progress` from `state_mapping` — no label-delta or UUID lookup needed
 
 ### Requirement: start mode optionally creates a branch using the detected branching strategy
 The skill SHALL offer to create a branch using the same gitflow/three-branch/single-branch detection logic as the issue-explore skill. Branch creation SHALL require explicit user confirmation. Passing `--no-branch` SHALL skip branch creation entirely.

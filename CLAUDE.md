@@ -63,3 +63,16 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+
+## Principles
+
+1. Everything as Code: 
+    - What ever action you take it should be reproducible and runnable in old way (with out AI/ML)
+    - In this way everything will be gitable and store history and maintain approval workflows.
+    - Also, replication for another task will be very easy.
+
+2. Everything should be decouple architecture
+    - so that one projects work can be re-usable artifact to others.
+
+3. Everything as Structured:
+    - Create Types (Pydantic, Typescript types etc) and then use them so that few bugs can caught during build time rather than execution time.

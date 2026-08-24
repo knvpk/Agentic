@@ -1,147 +1,99 @@
 ---
 name: backend-scaffold
-description: Bootstrap files every new backend project needs — flake.nix dev shell, Taskfile environment loading, pre-commit linters, ruff config for Python, and OpenAPI spec init. Use when starting a new backend service or repo from scratch, or when any of these foundational files are missing.
-compatibility: Requires Nix with flakes enabled, go-task >= 3, pre-commit >= 3. Python projects require ruff >= 0.4.
+description: Bootstrap files every new backend project needs — Nix dev shell, task runner, pre-commit/ruff for Python, and OpenAPI spec init. States this user's default tool for each concern and points to the dedicated convention skill for full rules. Use when starting a new backend service or repo from scratch, or when any of these foundational files are missing.
+compatibility: Requires Nix with flakes enabled, go-task >= 3 (or Just), pre-commit >= 3. Python projects require ruff >= 0.4.
 metadata:
   author: knvpk
-  version: "1.0"
+  version: "2.0"
 ---
 
 ## Overview
 
-Every new backend repo starts with the same five scaffolding concerns: a reproducible dev shell, a task runner with environment layering, pre-commit quality gates, a formatter/linter config (Python), and an OpenAPI spec stub. This skill covers all five with concrete file contents and the rationale behind each decision.
+Every new backend repo starts with the same four scaffolding concerns: a reproducible dev shell, a task runner, pre-commit/linting for Python, and an OpenAPI spec stub. This skill names the default tool for each and gives the minimal starting file — for the full rule set behind each default, follow the linked skill.
 
 ---
 
-## 1. `flake.nix` — Reproducible dev shell
+## 1. Dev shell — Nix (`flake.nix`)
 
-Add a `flake.nix` at the repo root so every developer and CI runner gets identical tooling regardless of host OS or distro.
-
-**Minimum tool set:** `git`, `jq`, `go-task`. Extend with language-specific tools (e.g. `python312`, `ruff`, `terraform`) inside `packages` as needed.
+Default. Gives every developer and CI runner identical tooling regardless of host OS. Full conventions — required `buildInputs`, attribute-set style, derivation layout, the paired `.envrc` — are in [[nix-best-practises]]; this is just the minimal starting point.
 
 ```nix
 {
-  description = "Dev shell for <project-name>";
+  description = "<project-name> — <purpose>";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    flake-utils.url = "github:numtide/flake-utils";
+    nixpkgs = {
+      url = "github:nixos/nixpkgs?ref=26.05";
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
-      let
-        pkgs = nixpkgs.legacyPackages.${system};
-      in {
-        devShells.default = pkgs.mkShell {
-          packages = with pkgs; [
-            git
-            jq
-            go-task
-            # add language runtimes and tools below
-          ];
-
-          shellHook = ''
-            echo "dev shell ready"
-          '';
-        };
-      });
+  outputs = { self, nixpkgs, ... }@inputs: let
+    system = "x86_64-linux";
+    pkgs = import nixpkgs { inherit system; };
+  in {
+    devShells.${system}.default = pkgs.mkShell {
+      buildInputs = with pkgs; [ git jq go-task nixd nixfmt-rfc-style ];
+    };
+  };
 }
 ```
 
-Enter the shell with `nix develop`. Pin `nixpkgs` to a specific rev for fully reproducible builds:
+```sh
+# .envrc
 
-```
-nixpkgs.url = "github:NixOS/nixpkgs/a1b2c3d4...";
+dotenv .env
+use flake
 ```
 
 ---
 
-## 2. `Taskfile.yaml` — Task runner with environment layering
+## 2. Task runner — Taskfile (recommended), justfile as alternative
 
-Use [go-task](https://taskfile.dev) as the task runner. The core pattern is a two-layer env loading: `.env` holds common defaults, `.env.{{.APP_ENV}}` holds environment-specific overrides that are merged on top.
+Default `Taskfile.yaml` (go-task) for new projects — full naming/structure rules (colon-namespaced tasks, `desc` on every task, dotenv layering, `prompt:` on destructive tasks) are in [[taskfile-conventions]]. Use `justfile` instead only if the user asks for Just, or the project already has one — see [[justfile-conventions]].
 
 ```yaml
 # Taskfile.yaml
 version: "3"
-
-dotenv:
-  - .env
-  - ".env.{{.APP_ENV}}"   # overrides .env; silently ignored if file missing
-
-vars:
-  APP_ENV:
-    sh: echo "${APP_ENV:-dev}"
+dotenv: ['.env']
 
 tasks:
-  default:
-    desc: List available tasks
-    cmds:
-      - task --list
-
   run:
-    desc: Start the application (APP_ENV={{.APP_ENV}})
+    desc: Start the application
     cmds:
-      - <your start command here>
+      - <start command>
 
   test:
     desc: Run tests
     cmds:
-      - <your test command here>
+      - <test command>
 
   lint:
     desc: Run pre-commit on all files
     cmds:
       - pre-commit run --all-files
-
-  install:
-    desc: Install pre-commit hooks
-    cmds:
-      - pre-commit install
 ```
 
-**Env file convention:**
-
-```
-.env               # shared defaults — commit a .env.example instead
-.env.dev           # development overrides
-.env.staging       # staging overrides
-.env.prod          # production overrides — never commit
-```
-
-`APP_ENV` selects the overlay. Running `APP_ENV=staging task run` merges `.env.staging` on top of `.env`.
-
-Always commit `.env.example` with every variable listed but no real values. Never commit `.env` or any overlay that contains credentials.
+Commit `.env.example` with every variable listed but no real values; never commit `.env`.
 
 ---
 
-## 3. `.pre-commit-config.yaml` — Quality gates
+## 3. Linting & formatting
 
-Every repo requires a `.pre-commit-config.yaml`. The hook set varies by stack.
+**Python — ruff.** Default and only linter/formatter; never add `black`/`isort`/`flake8` alongside it. Wire it into `.pre-commit-config.yaml` using the standard hook set (also includes `bandit` and `pyupgrade`) — see [[pre-commit-python]] for the full config and rationale.
 
-### Python projects
+```toml
+# ruff.toml
+target-version = "py312"
+line-length = 100
 
-```yaml
-repos:
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
-    hooks:
-      - id: trailing-whitespace
-      - id: end-of-file-fixer
-      - id: check-yaml
-      - id: check-toml
-      - id: check-merge-conflict
-      - id: detect-private-key
+[lint]
+select = ["E", "F", "I", "B", "UP"]
 
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.11.0   # pin to latest stable
-    hooks:
-      - id: ruff
-        args: [--fix]
-      - id: ruff-format
+[format]
+quote-style = "double"
 ```
 
-### Terraform projects
+**Terraform** — no dedicated convention skill yet, so the hook list lives here:
 
 ```yaml
 repos:
@@ -166,53 +118,15 @@ repos:
           - --args=--quiet
 ```
 
-### Mixed Python + Terraform
-
-Merge both hook lists into a single file. Put `pre-commit-hooks` first, then `ruff-pre-commit`, then `pre-commit-terraform`.
+Mixed Python + Terraform: merge into one file, Python hooks first (per [[pre-commit-python]] ordering), Terraform hooks appended last.
 
 Install after cloning: `task install` (or `pre-commit install` directly).
 
 ---
 
-## 4. `ruff.toml` — Python linter/formatter config
+## 4. OpenAPI spec init
 
-For Python projects, keep ruff config in a standalone `ruff.toml` at the repo root rather than embedding it in `pyproject.toml`. This keeps the file scannable and allows ruff to be used in repos that do not have a `pyproject.toml` (e.g. scripts-only repos).
-
-```toml
-# ruff.toml
-target-version = "py312"
-line-length = 100
-
-[lint]
-select = [
-  "E",    # pycodestyle errors
-  "W",    # pycodestyle warnings
-  "F",    # pyflakes
-  "I",    # isort
-  "B",    # flake8-bugbear
-  "UP",   # pyupgrade
-  "N",    # pep8-naming
-  "SIM",  # flake8-simplify
-]
-ignore = [
-  "E501",  # line too long — handled by formatter
-]
-
-[lint.isort]
-known-first-party = ["<your_package_name>"]
-
-[format]
-quote-style = "double"
-indent-style = "space"
-```
-
-Adjust `target-version` and `known-first-party` per project. Do not duplicate these settings in `pyproject.toml`; let `ruff.toml` be the single source of truth.
-
----
-
-## 5. OpenAPI spec init
-
-Add an `openapi.yaml` stub at the repo root (or under `docs/` for larger projects). This gives the team a machine-readable API contract from day one, even before any endpoints are implemented.
+Add an `openapi.yaml` stub at the repo root (or under `docs/` for larger projects) — a machine-readable API contract from day one, even before any endpoints exist.
 
 ```yaml
 # openapi.yaml
@@ -221,16 +135,10 @@ openapi: "3.1.0"
 info:
   title: <Project Name> API
   version: "0.1.0"
-  description: |
-    API specification for <Project Name>.
 
 servers:
   - url: http://localhost:8000
     description: Local development
-  - url: https://api.dev.<your-domain>
-    description: Development
-
-tags: []
 
 paths: {}
 
@@ -245,17 +153,18 @@ security:
   - bearerAuth: []
 ```
 
-Grow this file alongside the implementation. Paths and schemas added here become the contract that consumers program against — do not let implementation drift ahead of the spec.
+Grow this file alongside the implementation — don't let endpoints drift ahead of the spec.
 
 ---
 
 ## Checklist
 
-When scaffolding a new backend repo, verify all five files are present:
+When scaffolding a new backend repo, verify:
 
-- [ ] `flake.nix` with `git`, `jq`, `go-task` in `packages`
-- [ ] `Taskfile.yaml` with `dotenv` two-layer loading and a `lint` task
+- [ ] `flake.nix` (`buildInputs` per [[nix-best-practises]]) + matching `.envrc`
+- [ ] `Taskfile.yaml` (or `justfile`) per [[taskfile-conventions]] / [[justfile-conventions]]
 - [ ] `.env.example` committed; `.env` in `.gitignore`
-- [ ] `.pre-commit-config.yaml` matching the project stack (Python / Terraform / both)
+- [ ] If the project needs managed secrets, `secretspec.toml` — see [[secretspec-conventions]]
+- [ ] `.pre-commit-config.yaml` matching the stack — Python config per [[pre-commit-python]]
 - [ ] `ruff.toml` (Python projects only)
 - [ ] `openapi.yaml` stub at repo root

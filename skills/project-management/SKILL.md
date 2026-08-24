@@ -412,44 +412,19 @@ Always check `capabilities` in `.project/config.yaml` before using native API. I
 
 ## Shared: Provider Write Path Resolution
 
-For any operation that mutates an issue (state change, label add/remove, sprint label, milestone assign), use this universal resolution procedure.
+For any operation that mutates an issue (state change, label add/remove, sprint label, milestone assign), resolve the tool suffix from `tool_contracts` in `providers.json` (e.g. `update_ticket`) and call `mcp__{provider}__{suffix}`. If the MCP server isn't configured or the call fails because no write path is available, tell the user to configure it — see `mcp_setup` in `providers.json` for the install command and auth method — rather than guessing at an alternative.
 
-**Step 1 — Lazy project ID fetch for GitLab (if needed)**
+**Lazy project ID fetch for GitLab (if needed)**
 
-If provider is GitLab and `gitlab_project_id` is absent from `.project/config.yaml`:
-- Parse repo name from git remote; construct `{gitlab_group}/{repo_name}`
-- Call `GET /api/v4/projects/{url-encoded path}` via REST; store the numeric `id` as `gitlab_project_id` in config
+If provider is GitLab and `gitlab_project_id` is absent from `.project/config.yaml`, resolve it via the GitLab MCP tool that reads a project by path (e.g. `get_project`), using `{gitlab_group}/{repo_name}` parsed from the git remote. Store the numeric `id` as `gitlab_project_id` in config.
 
-**Step 2 — Resolve write path (REST → CLI → MCP)**
-
-Read `rest_config` and `cli_tool` from `providers.json` for the current provider. Before constructing any REST call, read `references/rest/{provider}.md` for the correct path patterns and auth format. If a REST call returns an unexpected 404 or auth error, consult the `docs` link in that file to verify the current path before retrying.
-
-1. **REST**: construct the appropriate `PUT`/`PATCH` call using `rest_config.base` + auth header. If the token env var is set and the call succeeds → done (no notice needed).
-2. **CLI**: if `cli_tool` is non-null, check `which {cli_tool}` exits 0 → use CLI; emit: `ℹ Using {cli_tool} CLI (REST unavailable)`
-3. **MCP**: resolve tool suffix from `tool_contracts.update_ticket`; call `mcp__{provider}__{suffix}`; emit: `ℹ Using MCP (REST and CLI unavailable)`
-4. All paths unavailable → **halt with error**:
-   ```
-   ✗ Cannot write to {Provider} issue — no write path available.
-   Enable one of:
-     1. REST: set {token_env} env var
-     2. CLI:  install {cli_tool}   (if applicable)
-     3. MCP:  configure the {provider} MCP server
-   ```
-
-**Step 3 — Label-delta helper (for label-based writes)**
+**Label-delta helper (for label-based writes)**
 
 When the write involves label changes (state transitions, sprint assignment):
-1. Fetch the issue's current labels via REST (`GET .../issues/{id}`)
+1. Fetch the issue's current labels via the provider's get-ticket MCP tool
 2. Identify the state label to remove: any label whose value matches a `state_mapping[*].label` entry in `providers.json`
 3. Compute `add_labels` and `remove_labels` as the delta; preserve all other labels
-
-Then dispatch via the resolved path:
-
-| Path | State change | Label add/remove |
-|------|-------------|-----------------|
-| REST | `PUT .../issues/{id}` with `state_event=close\|reopen&add_labels=X&remove_labels=Y` | same call |
-| CLI (glab) | `glab issue close/reopen` for state; `glab issue update --add-label X --remove-label Y` | separate calls |
-| MCP | `mcp__gitlab__update_issue` with `state_event` + `add_labels` + `remove_labels` | same tool |
+4. Call `mcp__gitlab__update_issue` with `state_event` (if the state changed) plus `add_labels` and `remove_labels`
 
 ---
 
@@ -677,50 +652,17 @@ Store as `project_type`: `mobile` | `web` | `api` | `microservices` | `generic`.
 | microservices | Repo structure? | separate-repos, monorepo | e.g. `separate-repos` |
 | generic | *(skip)* | — | *(omit from config)* |
 
-### Step 3 — REST credential collection and verification
+### Step 3 — Confirm provider access
 
-Read `rest_config` from `providers.json` for the detected provider.
+Run `ToolSearch` for the provider's MCP prefix (`provider.mcp_prefix`, e.g. `mcp__gitlab__`) to confirm its MCP server is configured and at least one tool resolves.
 
-**Collect credentials:**
-
-For providers with a variable host (GitLab self-hosted, Jira, Plane self-hosted):
-```
-{Provider} host URL: [https://gitlab.company.com]
-```
-For SaaS providers with a fixed base (GitHub, GitLab.com): skip host question.
-
-For each required token env var (from `rest_config.token_env` and `rest_config.email_env` if present):
-- Check environment: if already set → `Found {NAME} in environment ✓`
-- Not set → prompt (masked) → `export {NAME}="{value}"` → append to `~/.zshrc`
-
-**Jira extra**: Jira requires both `JIRA_EMAIL` and `JIRA_TOKEN`. Both must be collected.
-
-**Verify REST connection:**
-
-Read `references/rest/{provider}.md` for the correct ping path and auth format. Construct a lightweight read call using `rest_config`:
-- GitHub: `GET /user`
-- GitLab: `GET /api/v4/user`
-- Jira: `GET /rest/api/3/myself`
-- Plane: `GET /api/v1/workspaces/`
-
-Execute via `curl` using the auth header from `rest_config.auth_header`. On success:
-```
-REST connection verified ✓
-```
-
-On failure:
-```
-✗ Could not connect to {Provider} REST API.
-  Check {token_env} and host URL, then re-run init.
-```
-Stop here on failure.
+- **Found** → `✓ {Provider} MCP server reachable`
+- **Not found** → tell the user to configure it — see `mcp_setup` in `providers.json` for the install command and auth method for this provider — then stop until they've done so.
 
 Store in `.project/config.yaml`:
 ```yaml
 provider:
   name: gitlab
-  host: https://gitlab.company.com   # omit for SaaS providers
-  rest_verified_at: {ISO-8601 datetime}
 ```
 
 ### Step 3b — GitLab-specific setup (GitLab only)
@@ -740,10 +682,10 @@ Store as `gitlab_group` in `.project/config.yaml`.
 
 **Edition detection**
 
-Call the REST iterations endpoint: `GET /api/v4/groups/{gitlab_group}/iterations`:
-- 200 → `gitlab_edition: ee-premium`, `sprint_proxy: iteration`
-- 403 or 404 → `gitlab_edition: ce`, `sprint_proxy: label`, `sprint_label_scope: sprint`
-- Network error or ambiguous → ask: `"Could not detect GitLab edition. Is your instance EE Premium or Ultimate? [y/n]"`
+Call the GitLab MCP iterations tool (`gitlab_extras.edition_probe.tool` in `providers.json`, i.e. `mcp__gitlab__list_iterations`) scoped to `gitlab_group`:
+- Succeeds (returns a list, even empty) → `gitlab_edition: ee-premium`, `sprint_proxy: iteration`
+- Fails with not-found/forbidden, or the tool isn't available → `gitlab_edition: ce`, `sprint_proxy: label`, `sprint_label_scope: sprint`
+- Ambiguous → ask: `"Could not detect GitLab edition. Is your instance EE Premium or Ultimate? [y/n]"`
   - `y` → `gitlab_edition: ee-premium`, `sprint_proxy: iteration`
   - `n` → `gitlab_edition: ce`, `sprint_proxy: label`, `sprint_label_scope: sprint`
 
@@ -754,7 +696,7 @@ Store results in `.project/config.yaml`.
 If `gitlab_edition == "ce"`:
 
 First, if this is a re-probe (`init --probe`), check for existing sprint labels:
-- Call `GET /api/v4/projects/{gitlab_project_id}/labels?search=sprint::` via REST
+- Call the GitLab MCP list-labels tool (`mcp__gitlab__list_labels`) filtered to the `sprint::` prefix
 - If labels found AND the stored `sprint_convention` differs from what the user is about to select → after selection, output:
   ```
   ⚠ Sprint labels already exist using {old_convention} convention — changing requires
@@ -777,30 +719,27 @@ Output: `⚠ Convention cannot be changed after the first sprint is created with
 
 Parse the repo name from the git remote (segment after the last `/` in the path, minus `.git` suffix). Construct full project path: `{gitlab_group}/{repo_name}`.
 
-Call `GET /api/v4/projects/{url-encoded project path}` via REST:
-- 200 → read the numeric `id` field; store `gitlab_project_id: <id>` in `.project/config.yaml`
-- Error → skip silently; `gitlab_project_id` will be fetched lazily on first write operation
+Call the GitLab MCP project-lookup tool for that path:
+- Found → read the numeric `id` field; store `gitlab_project_id: <id>` in `.project/config.yaml`
+- Not found / tool unavailable → skip silently; `gitlab_project_id` will be fetched lazily on first write operation
 
 **pm-meta project setup (CE only)**
 
 If `gitlab_edition == "ce"`:
 1. Compute target path: `{gitlab_group}/pm-meta`
-2. Call `GET /api/v4/projects/{url-encoded path}` via REST:
-   - 200 → project exists; store `pm_meta_project: {gitlab_group}/pm-meta`
-   - 404 → call `POST /api/v4/projects` with `name: pm-meta`, `namespace_id: {group_id}`:
+2. Call the GitLab MCP project-lookup tool for that path:
+   - Found → project exists; store `pm_meta_project: {gitlab_group}/pm-meta`
+   - Not found → call the GitLab MCP create-project tool with `name: pm-meta`, `namespace_id: {group_id}`:
      - Success → store `pm_meta_project: {gitlab_group}/pm-meta`
-     - 403 → store `pm_meta_project: {current_project_path}`; output `⚠ Could not create pm-meta project — sprint metadata will be stored in the current project`
+     - Permission denied → store `pm_meta_project: {current_project_path}`; output `⚠ Could not create pm-meta project — sprint metadata will be stored in the current project`
 
-### Step 4 — REST capability probe
+### Step 4 — Capability probe
 
-For each feature, call the relevant REST read endpoint. Map result to capability flag:
+For each feature (epics, sprints, relationships, sub_issues), call the MCP tool named in `probe_endpoints` for the current provider (`providers.json`). Map the result to a capability flag:
 
-| Feature | REST endpoint (suffix) | 200 → | 403/error → | ambiguous → |
-|---------|------------------------|--------|-------------|-------------|
-| epics | `/modules` / `/epics` | true | false | ask user |
-| sprints | `/cycles` / `/milestones` / `/board` | true | false | ask user |
-| relationships | `/issue-relations` / `/issue_links` | true | false | ask user |
-| sub_issues | `/issues` | true | false | assume true |
+- Tool call succeeds → `true`
+- Tool call fails with a not-found/forbidden/plan-restriction error → `false`
+- `probe_endpoints` entry is `null`, or the result is ambiguous → ask user
 
 For **GitLab**: use `gitlab_edition` from Step 3b to select `plan_variants.ce` or `plan_variants.ee-premium` from `providers.json` instead of probing sprint capability separately. The edition detection in Step 3b IS the sprint probe for GitLab.
 
@@ -809,7 +748,7 @@ When asking the user (ambiguous probe):
 
 **Plane extra — state UUID resolution**
 
-If `provider.name == "plane"`, call `GET /api/v1/workspaces/{slug}/projects/{project_id}/states/` via REST (using `X-API-Key` auth header), or `mcp__plane__list_states` if REST is unavailable. For each returned state, reverse-map its `name` against `state_mapping` `state_name` values to find the matching canonical state. Build a map and store in `.project/config.yaml`:
+If `provider.name == "plane"`, call `mcp__plane__list_states`. For each returned state, reverse-map its `name` against `state_mapping` `state_name` values to find the matching canonical state. Build a map and store in `.project/config.yaml`:
 
 ```yaml
 plane_state_ids:
@@ -1382,7 +1321,7 @@ After all create calls complete:
 Add all N created tickets to Sprint {name}? [y/n]
 ```
 On `y`: for each successfully created ticket —
-- **GitLab CE (`sprint_proxy == "label"`)**: use **Shared: GitLab Write Path Resolution** to add `active_sprint.label_name` to the issue's labels
+- **GitLab CE (`sprint_proxy == "label"`)**: use **Shared: Provider Write Path Resolution** to add `active_sprint.label_name` to the issue's labels
 - **All other providers**: call the sprint assignment MCP tool with the sprint ID
 
 **Epic label offer** (only if manifest had ≥2 distinct epic groups):
@@ -1535,7 +1474,7 @@ Run this check **after** state machine validation and **before** the provider ca
    On `n` → output `Transition cancelled` and stop. On `y` → proceed with the provider call.
 
 - **GitHub, Jira, Plane**: call `update_ticket` directly.
-- **GitLab**: use **Shared: GitLab Write Path Resolution** + label-delta helper to apply the transition. For `blocked`: prompt for reason + optional blocking ticket ref before calling the resolved write path.
+- **GitLab**: use **Shared: Provider Write Path Resolution** + label-delta helper to apply the transition. For `blocked`: prompt for reason + optional blocking ticket ref before calling the resolved write path.
 
 ---
 
@@ -1794,7 +1733,7 @@ Output: `✓ Retro issue created: {issue_url}`
 
 Read `sprint_proxy` from config.
 
-**GitLab CE (`sprint_proxy == "label"`)**: apply or remove the sprint scoped label on the issue using **Shared: GitLab Write Path Resolution**:
+**GitLab CE (`sprint_proxy == "label"`)**: apply or remove the sprint scoped label on the issue using **Shared: Provider Write Path Resolution**:
 - **add**: resolve the write path, then apply `add_labels: active_sprint.label_name` (fetch current labels first to avoid overwriting others)
 - **remove**: resolve the write path, then apply `remove_labels: active_sprint.label_name`
 
@@ -1877,7 +1816,7 @@ Read `capabilities.milestones` from config:
 
 **assign** — attach a ticket to a milestone.
 - **GitHub, Jira, Plane**: call `milestone_contracts.assign` (update issue with milestone field / fixVersions)
-- **GitLab**: use **Shared: GitLab Write Path Resolution** to set the `milestone_id` field on the issue
+- **GitLab**: use **Shared: Provider Write Path Resolution** to set the `milestone_id` field on the issue
 - Fallback (Plane, unsupported milestone): add label `milestone:{slug}` to the ticket
 
 **list** — call `milestone_contracts.list`. Display name, due date, open/closed ticket counts.
@@ -2519,12 +2458,12 @@ If `Edit first`: show as plain text, accept edits, re-confirm.
 
 **Provider routing:**
 
-| Provider | Write tool | Fallback 1 | Fallback 2 |
-|----------|-----------|-----------|-----------|
-| GitHub | `mcp__github__add_issue_comment(owner, repo, issue_number, body)` split from `project_ref` | — | — |
-| GitLab | `mcp__gitlab__create_note(project_id, issue_iid, body)` | `glab issue note <id> --project <project_ref> -m "..."` | `curl -X POST "$GITLAB_URL/api/v4/projects/<encoded_project_ref>/issues/<id>/notes" -H "PRIVATE-TOKEN: $GITLAB_TOKEN" -d "body=..."` |
-| Jira | Jira MCP comment tool from `tool_contracts` in `references/providers.json` | — | — |
-| Plane | Plane MCP comment tool from `tool_contracts` in `references/providers.json` | — | — |
+| Provider | Write tool |
+|----------|-----------|
+| GitHub | `mcp__github__add_issue_comment(owner, repo, issue_number, body)` split from `project_ref` |
+| GitLab | `mcp__gitlab__create_note(project_id, issue_iid, body)` |
+| Jira | Jira MCP comment tool from `tool_contracts` in `references/providers.json` |
+| Plane | Plane MCP comment tool from `tool_contracts` in `references/providers.json` |
 
 On write failure: print comment text to terminal with `⚠ Could not write to tracker — copy and post manually.`
 
@@ -2912,34 +2851,11 @@ Read `provider.name` from `.project/config.yaml` (treat as absent if file missin
 
 #### GitLab (`provider.name == "gitlab"`)
 
-Use the same write-path resolution pattern as **Shared: GitLab Write Path Resolution**:
+Call `mcp__gitlab__create_release(project_id: gitlab_project_id, tag_name: current_tag, name: header, description: release_body)`.
 
-**Step 1** — `ToolSearch("mcp__gitlab__create_release")`:
-- Found → call:
-  ```
-  mcp__gitlab__create_release(
-    project_id: gitlab_project_id,
-    tag_name: current_tag,
-    name: header,
-    description: release_body
-  )
-  ```
-  - On 409 / "already exists" error → emit `ℹ Release already exists for {current_tag} — skipping publish.` and print `release_body` to terminal.
-  - On success → emit `✓ GitLab Release created: {current_tag}`
-
-**Step 2** — Tool not found, `GITLAB_TOKEN` is set → REST:
-```
-POST /api/v4/projects/{gitlab_project_id}/releases
-Body: { "tag_name": current_tag, "name": header, "description": release_body }
-Header: PRIVATE-TOKEN: $GITLAB_TOKEN
-```
-Same 409 and success handling as Step 1.
-
-**Step 3** — Both unavailable → emit:
-```
-ℹ Could not publish to GitLab — copy the release notes below and create manually.
-```
-Print `release_body` to terminal.
+- On 409 / "already exists" error → emit `ℹ Release already exists for {current_tag} — skipping publish.` and print `release_body` to terminal.
+- On success → emit `✓ GitLab Release created: {current_tag}`
+- Tool unavailable (MCP server not configured) → emit `ℹ Could not publish to GitLab — copy the release notes below and create manually.` and print `release_body` to terminal.
 
 #### All other providers (GitHub, Jira, Plane, or no provider)
 

@@ -10,3 +10,4 @@ Reusable tools, workflows, prompts, and architectures for Agentic AI development
 | [project-management](skills/project-management) | Provider-agnostic PM — tickets, sprints, docs, standups across GitHub/GitLab/Jira/Plane | `npx skills add knvpk/Agentic --skill project-management` |
 | [issue-explore](skills/issue-explore) | Fetch any issue (GitHub/GitLab/Jira/Plane) and load it into an explore session | `npx skills add knvpk/Agentic --skill issue-explore` |
 | [vibe-wiki](skills/vibe-wiki) | Build and maintain a persistent, compounding wiki from URLs and local files | `npx skills add knvpk/Agentic --skill vibe-wiki` |
+| [my-brain](skills/my-brain) | Core engineering principles: as code, decoupled, structured, scalable, measured | `npx skills add knvpk/Agentic --skill my-brain` |

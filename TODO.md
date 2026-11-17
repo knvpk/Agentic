@@ -14,3 +14,8 @@
 - [x] Branching strategy should be part of config.yaml
 - [ ] After ospx archive it should detect if there are any new changes did, it should comment on the gitlab issue. Also possible new changes concluded in explore session should update tickets as well.
 - [x] In `project-management` skill add `help` command.
+- [x] Keep the copy fo CLAUDE.md in nixos pointing to ~/.claude/CLAUDE.md
+- [ ] Enrich claude.md with documentation rule
+- [ ] Enrich Claude.md with measurement and improve
+- [ ] Enrich Claude.md to or update memory in project root rather than os level
+- [ ] Add a skill that invoke at every session ends and improves the harness.

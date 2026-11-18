@@ -127,3 +127,14 @@ After all checked tickets are successfully created, the skill SHALL offer two fo
 #### Scenario: Sprint offer skipped when no active sprint configured
 - **WHEN** `.project/config.yaml` has no `active_sprint`
 - **THEN** the sprint assignment offer is skipped entirely
+
+### Requirement: Bulk reads the same doc files per extended project type as docs scaffold
+For `qa`, `ai`, `cli`, and `library` the skill SHALL read `prd.md`, `architecture.md`, and `tools.md`; for `bi` it SHALL read `prd.md`, `architecture.md`, `database.md`, and `tools.md`. Missing files are silently skipped.
+
+#### Scenario: bi reads database.md
+- **WHEN** bulk mode runs with `project_type: bi`
+- **THEN** the skill reads `docs/database.md` for entity candidates
+
+#### Scenario: library skips database.md
+- **WHEN** bulk mode runs with `project_type: library`
+- **THEN** the skill does not attempt to read `docs/database.md`

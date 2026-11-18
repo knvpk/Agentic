@@ -19,3 +19,4 @@
 - [ ] Enrich Claude.md with measurement and improve
 - [ ] Enrich Claude.md to or update memory in project root rather than os level
 - [ ] Add a skill that invoke at every session ends and improves the harness.
+- [ ] shipping with a PR needs some evidence. It may need to follow the repo conventions as well.

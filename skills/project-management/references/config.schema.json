@@ -15,7 +15,7 @@
     },
     "project_type_enum": {
       "type": "string",
-      "enum": ["mobile", "web", "api", "microservices", "generic"]
+      "enum": ["mobile", "web", "api", "microservices", "qa", "ai", "bi", "cli", "library", "generic"]
     },
     "stack_enum": {
       "type": "string",
@@ -24,6 +24,10 @@
         "nextjs", "nuxt", "remix", "vite-spa",
         "rest", "graphql", "grpc", "mixed",
         "separate-repos", "monorepo",
+        "python", "typescript", "go", "rust", "node",
+        "llm-app", "rag", "agent", "ml-training",
+        "dbt", "metabase", "superset", "looker", "powerbi",
+        "playwright", "cypress", "pytest", "k6",
         "other"
       ]
     },
@@ -128,6 +132,11 @@
     "provider":      { "$ref": "#/$defs/provider_block" },
     "project_type":  { "$ref": "#/$defs/project_type_enum" },
     "stack":         { "$ref": "#/$defs/stack_enum" },
+    "base_branch": {
+      "type": "string",
+      "default": "main",
+      "description": "Base branch for pull requests created by ship mode. Defaults to main when absent."
+    },
     "active_sprint": {
       "description": "Currently active sprint reference. Shape depends on sprint_proxy.",
       "oneOf": [
@@ -159,6 +168,59 @@
           "exclude": {
             "type": "boolean",
             "description": "Set true to suppress this path from doc resolution, e.g. to silence an auto-discovered submodule."
+          }
+        }
+      }
+    },
+    "start": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "worktree": {
+          "type": "boolean",
+          "default": true,
+          "description": "true (or absent): start creates each ticket branch as a sibling git worktree. false: start creates the branch in place with git checkout -b."
+        }
+      }
+    },
+    "ship": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "PR evidence settings. Every key is optional; omitted keys fall back to the project_type default and repo detection.",
+          "properties": {
+            "kinds": {
+              "type": "array",
+              "items": { "type": "string", "enum": ["image", "link", "markdown", "text"] },
+              "description": "Complete list of evidence kinds; replaces the project_type default when present."
+            },
+            "image": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "start_command": { "type": "string" },
+                "base_url": { "type": "string" },
+                "viewports": { "type": "array", "items": { "type": "integer", "minimum": 1 } }
+              }
+            },
+            "link": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": { "report_url": { "type": "string" } }
+            },
+            "markdown": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": { "spec_path": { "type": "string" } }
+            },
+            "extra": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Strings appended verbatim to the PR Evidence section."
+            }
           }
         }
       }
@@ -276,6 +338,87 @@
         }
       },
       "then": { "required": ["stack"] }
+    },
+    {
+      "if": {
+        "required": ["project_type"],
+        "properties": { "project_type": { "const": "mobile" } }
+      },
+      "then": {
+        "properties": { "stack": { "enum": ["react-native", "flutter", "native", "other"] } }
+      }
+    },
+    {
+      "if": {
+        "required": ["project_type"],
+        "properties": { "project_type": { "const": "web" } }
+      },
+      "then": {
+        "properties": { "stack": { "enum": ["nextjs", "nuxt", "remix", "vite-spa", "other"] } }
+      }
+    },
+    {
+      "if": {
+        "required": ["project_type"],
+        "properties": { "project_type": { "const": "api" } }
+      },
+      "then": {
+        "properties": { "stack": { "enum": ["rest", "graphql", "grpc", "mixed", "other"] } }
+      }
+    },
+    {
+      "if": {
+        "required": ["project_type"],
+        "properties": { "project_type": { "const": "microservices" } }
+      },
+      "then": {
+        "properties": { "stack": { "enum": ["separate-repos", "monorepo", "other"] } }
+      }
+    },
+    {
+      "if": {
+        "required": ["project_type"],
+        "properties": { "project_type": { "const": "qa" } }
+      },
+      "then": {
+        "properties": { "stack": { "enum": ["playwright", "cypress", "pytest", "k6", "other"] } }
+      }
+    },
+    {
+      "if": {
+        "required": ["project_type"],
+        "properties": { "project_type": { "const": "ai" } }
+      },
+      "then": {
+        "properties": { "stack": { "enum": ["llm-app", "rag", "agent", "ml-training", "other"] } }
+      }
+    },
+    {
+      "if": {
+        "required": ["project_type"],
+        "properties": { "project_type": { "const": "bi" } }
+      },
+      "then": {
+        "properties": { "stack": { "enum": ["dbt", "metabase", "superset", "looker", "powerbi", "other"] } }
+      }
+    },
+    {
+      "if": {
+        "required": ["project_type"],
+        "properties": { "project_type": { "const": "cli" } }
+      },
+      "then": {
+        "properties": { "stack": { "enum": ["python", "go", "node", "rust", "other"] } }
+      }
+    },
+    {
+      "if": {
+        "required": ["project_type"],
+        "properties": { "project_type": { "const": "library" } }
+      },
+      "then": {
+        "properties": { "stack": { "enum": ["python", "typescript", "go", "rust", "other"] } }
+      }
     },
     {
       "if": {

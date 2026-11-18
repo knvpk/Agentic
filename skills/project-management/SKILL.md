@@ -98,6 +98,7 @@ Run Query Normalization first, then route:
 | "bulk", "generate tickets", "create tickets from docs", "populate backlog", "generate backlog" | **bulk** |
 | "sync ticket", "post to ticket", "update ticket", "archive sync", "sync issue", "capture this", "capture" | **sync** |
 | "ship", "ship my changes", "commit and pr", "commit and create pr", "push and pr", "commit all changes" | **ship** |
+| "watch PR #42", "pr-watch 42", "watch this PR" | **pr-watch** |
 | "release notes", "release this", "generate release notes" | **release-notes** |
 | "release notes for uat", "release candidate" | **release-notes** (UAT framing) |
 | "release notes for prod", "release to production", "release notes for production" | **release-notes** (PROD framing) |
@@ -144,6 +145,7 @@ DAILY WORKFLOW
   backlog   Refine unestimated backlog tickets (story points + DoR check)
   sync      Post archive summary or explore conclusion to linked ticket
   ship      Commit all changes, push, and open a PR in one command
+  pr-watch  One watch tick: GitHub Actions status + new PR comments, report-only
   release-notes  Generate release notes from git tags (prev-tag → current-tag)
 
 Type: help <mode>  for details. Example: help sprint
@@ -243,17 +245,26 @@ next — recommend the best ticket to work on right now
 
 **`help start`**
 ```
-start — load a ticket and create its feature branch
+start — load a ticket, auto-start it, and open explore mode
 
-  Fetches ticket by ID or URL, enriches with project doc context, checks WIP limit,
-  transitions to in-progress, creates a branch, and opens explore mode.
+  Fetches ticket by ID or URL, enriches with project doc context. By default,
+  transitions it to in-progress and creates its branch as an isolated git worktree
+  automatically — no confirmation — then opens explore mode. Set
+  `start.worktree: false` in .project/config.yaml to branch in place with
+  `git checkout -b` instead. Pauses once, with a single combined question, only
+  when: the WIP limit would be exceeded, the ticket looks broad in scope (reused
+  ticket-breakdown heuristic), its estimate is larger than 5, or (in-place mode)
+  the working tree has uncommitted changes.
 
   Flags:
-    --no-branch   Skip branch creation; continue in exploration mode only
+    --no-branch   Skip branch/worktree creation; continue in exploration mode only
+    --confirm     Force the combined confirmation every time, even if nothing
+                  would otherwise trigger it
 
   Examples:
     "start TICK-42"
     "work on #38"
+    "start TICK-42 --confirm"
 ```
 
 **`help status`**
@@ -343,6 +354,15 @@ ship — commit, push, and create a PR in one command
   Works without .project/config.yaml — auto-detects provider from git remote.
   Skips PR creation for Jira and Plane (commit + push only).
 
+  The PR body ends with an Evidence section. Its kind follows project_type
+  (web/mobile/bi → screenshots, qa → report link, api → OpenAPI diff as
+  markdown, cli/library/ai/generic → transcript); tools, spec path and start
+  command are auto-detected and shown at confirmation. Screenshots are hosted on
+  an orphan `pr-evidence` branch (GitHub only). Override anything under
+  `ship.evidence` in .project/config.yaml; `extra` strings are appended verbatim.
+
+  After a successful GitHub PR, offers to start a recurring pr-watch via /loop.
+
   Options at confirmation:
     y        proceed
     e        edit the commit message
@@ -352,6 +372,21 @@ ship — commit, push, and create a PR in one command
     "ship"
     "commit and pr"
     "commit all changes"
+```
+
+**`help pr-watch`**
+```
+pr-watch — watch a GitHub PR's CI and comments, report-only
+
+  One tick: checks the PR's state (stops the watch if merged/closed), fetches
+  GitHub Actions run status for the head commit, and any new PR comments since
+  the last tick. Reports findings — never pushes a fix or replies on your behalf.
+  Persists last-seen run/comment IDs in .project/pr-watch/<pr-number>.yaml.
+  Scheduling across ticks is handled by /loop, not by this mode. GitHub only.
+
+  Examples:
+    "watch PR #42"
+    "pr-watch 42"
 ```
 
 **`help release-notes`**
@@ -378,7 +413,7 @@ release-notes — generate release notes from git tags
 
 If the word after "help" does not match any known mode name, output:
 ```
-Unknown mode: <name>. Valid modes: init, docs, ticket, sprint, next, start, status, standup, backlog, bulk, sync, ship, release-notes
+Unknown mode: <name>. Valid modes: init, docs, ticket, sprint, next, start, status, standup, backlog, bulk, sync, ship, pr-watch, release-notes
 ```
 
 ---
@@ -521,6 +556,38 @@ I see enough scope here for multiple tickets — propose a breakdown? [y/n]
 
 ---
 
+## Shared: Start-Mode Pre-Flight Gate
+
+Used by `start` mode to decide whether to transition a ticket to `in-progress` and create its branch/worktree automatically, or pause once for a combined confirmation. Replaces two separate prompts (transition, then branch) with a single gate evaluated before either action.
+
+### Gate conditions
+
+Evaluate all four; the gate fires if **any** is true:
+
+| Condition | Check |
+|---|---|
+| WIP limit | Run steps 1–3 of the **Shared: WIP Limit Check** (read `wip_limit`, fetch in-progress count, compare) to get a boolean "would exceed" result. Do not show that check's own `Continue? [y/n]` prompt here — this gate's combined question supersedes it. |
+| Scope-width signal | Evaluate the **Shared: Scope-Width Detection Signals** (conjunction, plural-area-without-verb, docs-breadth) against `ticket.title + " " + ticket.description`, instead of raw user input. For the docs-breadth signal specifically, do NOT run a second relevance scan — reuse the match count already produced by the Context Fallback Chain (start mode's fetch-and-prepare step): ≥3 distinct (file, section) matches counts as true. |
+| Large estimate | Ticket's estimate field is set to a numeric value greater than `5`. A missing, empty, or zero estimate does NOT fire this condition — it simply contributes nothing to the gate. |
+| Dirty tree (in-place mode) | `start.worktree` is `false` **and** `git status --porcelain` is non-empty. Does NOT apply when `start.worktree` is `true` or absent — a worktree never touches the current checkout. |
+
+Passing `--confirm` on the `start` invocation forces the gate to fire unconditionally, regardless of the four conditions above, for that single invocation only. It is not persisted — the next invocation without `--confirm` evaluates the gate normally.
+
+### Gate outcome
+
+- **No condition true** (and no `--confirm`): proceed automatically — perform the state transition and branch/worktree creation, then report both in one combined summary line. No question is asked.
+- **Any condition true** (or `--confirm` passed): ask once, combining the transition and branch/worktree decision:
+  ```
+  TICK-42 looks {reason} — transition to in-progress and create its branch anyway? [y/n]
+  ```
+  Where `{reason}` names whichever condition(s) fired — e.g. "like it's at the WIP limit", "broad in scope", "like its estimate is large", "like uncommitted changes would carry onto the new branch" — joined with "and" when more than one fires.
+  - **y** → perform both the transition and the branch/worktree creation
+  - **n** → output `Transition cancelled — continuing in exploration mode (ticket stays in current state).` and skip both actions
+
+This gate has no effect on tickets already in `in-progress`, `in-review`, `done`, or `blocked` — those states keep start mode's existing state-specific messaging (see Step 2, below) instead of gate evaluation.
+
+---
+
 ## Shared: Manifest Review
 
 Used by both `bulk` mode and `ticket new` breakdown flow. This is the mandatory human review step — no MCP ticket creation calls are made until `create` is confirmed.
@@ -637,10 +704,15 @@ What kind of project is this?
   2. Web app     (SPA / SSR / PWA)
   3. API service (REST / GraphQL / gRPC)
   4. Microservices  (multiple services — this is the coordination repo)
-  5. Generic / full-stack
+  5. QA          (a dedicated test-automation repo)
+  6. AI / ML     (LLM app, RAG, agent, model training)
+  7. BI / analytics  (dashboards, metrics, dbt)
+  8. CLI tool
+  9. Library / SDK
+  10. Generic / full-stack
 ```
 
-Store as `project_type`: `mobile` | `web` | `api` | `microservices` | `generic`.
+Store as `project_type`: `mobile` | `web` | `api` | `microservices` | `qa` | `ai` | `bi` | `cli` | `library` | `generic`.
 
 **Conditional follow-up** — ask only the matching clarification, skip for generic:
 
@@ -650,7 +722,20 @@ Store as `project_type`: `mobile` | `web` | `api` | `microservices` | `generic`.
 | web | Framework? | nextjs, nuxt, remix, vite-spa, other | e.g. `nextjs` |
 | api | Protocol? | rest, graphql, grpc, mixed | e.g. `rest` |
 | microservices | Repo structure? | separate-repos, monorepo | e.g. `separate-repos` |
+| qa | Test tool? | playwright, cypress, pytest, k6, other | e.g. `playwright` |
+| ai | Shape? | llm-app, rag, agent, ml-training, other | e.g. `rag` |
+| bi | Tooling? | dbt, metabase, superset, looker, powerbi, other | e.g. `dbt` |
+| cli | Language? | python, go, node, rust, other | e.g. `go` |
+| library | Language? | python, typescript, go, rust, other | e.g. `typescript` |
 | generic | *(skip)* | — | *(omit from config)* |
+
+**Worktree preference** — ask once, for every project type:
+```
+Create a separate git worktree for each ticket? [Y/n]
+  (choose n if the app needs untracked files, a running dev server, or the repo uses submodules)
+```
+
+Store the answer as `start.worktree` (`Y` → `true`, `n` → `false`). A config with no `start.worktree` is treated as `true` and is never re-asked.
 
 ### Step 3 — Confirm provider access
 
@@ -838,6 +923,11 @@ Output: `✓ State labels created` or `✓ State labels already present`.
 | web | `seo`, `performance`, `a11y`, `responsive`, `pwa`, `breaking` | `#0075ca`, `#e4e669`, `#0052cc`, `#7057ff`, `#28a745`, `#d93f0b` |
 | api | `breaking-change`, `contract-change`, `deprecation`, `versioning`, `consumer-impact` | `#d93f0b`, `#b60205`, `#e4e669`, `#0075ca`, `#7057ff` |
 | microservices | `cross-cutting`, `contract-change`, `migration` | `#7057ff`, `#b60205`, `#e4e669` |
+| qa | `flaky`, `coverage-gap`, `regression`, `test-data`, `env` | `#e4e669`, `#0075ca`, `#d93f0b`, `#7057ff`, `#28a745` |
+| ai | `prompt`, `eval`, `model`, `guardrail`, `cost`, `latency` | `#0075ca`, `#28a745`, `#7057ff`, `#b60205`, `#e4e669`, `#d93f0b` |
+| bi | `metric-definition`, `data-quality`, `dashboard`, `source` | `#0075ca`, `#b60205`, `#28a745`, `#7057ff` |
+| cli | `breaking-change`, `ux`, `flags`, `exit-codes`, `completion`, `packaging`, `cross-platform` | `#d93f0b`, `#28a745`, `#0075ca`, `#b60205`, `#7057ff`, `#e4e669`, `#0052cc` |
+| library | `semver`, `breaking-change`, `deprecation`, `docs-gap` | `#0075ca`, `#d93f0b`, `#e4e669`, `#7057ff` |
 | generic | *(none)* | — |
 
 Output: `✓ Type labels created` or `✓ Type labels already present` (skip silently for generic).
@@ -917,11 +1007,13 @@ Read `project_type` from `.project/config.yaml`. If absent, treat as `generic`.
 | web | prd.md, architecture.md, database.md, tools.md |
 | api | prd.md, architecture.md, database.md, tools.md, api.md |
 | microservices | architecture.md, services.md, tools.md |
+| qa, ai, cli, library | prd.md, architecture.md, tools.md |
+| bi | prd.md, architecture.md, database.md, tools.md |
 | generic | prd.md, architecture.md, database.md, tools.md |
 
 Create each file only if it doesn't already exist:
 
-**docs/prd.md** *(mobile, web, api, generic)*
+**docs/prd.md** *(mobile, web, api, qa, ai, bi, cli, library, generic)*
 ```markdown
 ## Overview
 
@@ -945,7 +1037,7 @@ Create each file only if it doesn't already exist:
 ## Architecture Decisions
 ```
 
-**docs/database.md** *(web, api, generic)*
+**docs/database.md** *(web, api, bi, generic)*
 ```markdown
 ## Overview
 
@@ -1003,7 +1095,7 @@ Create each file only if it doesn't already exist:
 **Data ownership**: entities/tables owned by this service.
 ```
 
-**docs/tools.md** *(generic, web, api, microservices variant)*
+**docs/tools.md** *(generic, web, api, microservices, qa, ai, bi, cli, library variant)*
 ```markdown
 ## Language
 
@@ -1090,10 +1182,14 @@ Read `project_type` from `.project/config.yaml` (treat as `generic` if absent), 
 
 | project_type | Question | Target sections |
 |---|---|---|
-| web, api, generic | "What database(s) do you use, and what are the main entities/tables?" | `database.md §Overview`, `database.md §Entities` |
+| web, api, bi, generic | "What database(s) do you use, and what are the main entities/tables?" | `database.md §Overview`, `database.md §Entities` |
 | api | "How is the API authenticated and versioned? (e.g. Bearer token, URI versioning)" | `api.md §Authentication`, `api.md §Versioning Strategy` |
 | microservices | "List your services with their responsibilities (name: description, one per line)" | `services.md §Service Registry` |
 | mobile | "What local storage engine do you use, and how does data sync with the backend?" | `local-storage.md §Storage Engine`, `local-storage.md §Sync Strategy` |
+| library | "What is the public API surface and versioning policy?" | `architecture.md §Components`, `architecture.md §Architecture Decisions` |
+| ai | "Which models/providers are used and how are outputs evaluated?" | `architecture.md §Components`, `architecture.md §Architecture Decisions` |
+| cli | "What commands and flags form the public interface, and what is the output contract (stdout, stderr, exit codes)?" | `architecture.md §Components` |
+| qa | "What is under test, and which tools and environments are used?" | `architecture.md §Components`, `tools.md` |
 
 #### Step C — Optional questions
 
@@ -1233,6 +1329,8 @@ Read `project_type` from `.project/config.yaml`. Read every doc file that exists
 | web | prd.md, architecture.md, database.md, tools.md |
 | api | prd.md, architecture.md, database.md, api.md, tools.md |
 | microservices | architecture.md, services.md, tools.md |
+| qa, ai, cli, library | prd.md, architecture.md, tools.md |
+| bi | prd.md, architecture.md, database.md, tools.md |
 | generic | prd.md, architecture.md, database.md, tools.md |
 
 Collect all file paths that were successfully read. These become the `source_files` list shown in the manifest header.
@@ -1381,6 +1479,11 @@ Follow the **Context Fallback Chain** defined in Shared section above. Collect o
 | web | `GIVEN API call is in-flight / WHEN component renders / THEN skeleton loader shown, not blank screen`; `GIVEN user submits form with invalid input / WHEN validation runs / THEN inline errors appear and submit stays disabled`; `GIVEN mobile viewport (375px) / WHEN page loads / THEN layout adapts to single-column with accessible touch targets` |
 | api | `GIVEN authenticated user with scope=read:orders / WHEN GET /orders?status=pending / THEN 200 with paginated list and X-Total-Count header`; `GIVEN request without Authorization header / WHEN POST /payments / THEN 401 with WWW-Authenticate challenge`; `GIVEN 51st request in a 60-second window (limit=50/min) / WHEN rate limiter evaluates / THEN 429 Too Many Requests with Retry-After header` |
 | microservices | `GIVEN orders-svc calls inventory-svc.reserveStock() / WHEN inventory-svc returns 503 three times / THEN circuit breaker trips, order stays in PENDING`; `GIVEN payment-svc publishes order.paid event / WHEN notifications-svc is down / THEN event persists in DLQ and is delivered after recovery`; `GIVEN payment succeeds but order creation fails / WHEN saga compensates / THEN payment is refunded and no order record persists` |
+| qa | `GIVEN a clean environment / WHEN the suite runs / THEN all tests pass without retries`; `GIVEN a flaky test / WHEN it fails intermittently / THEN it is quarantined with a linked ticket` |
+| ai | `GIVEN a prompt with retrieved context / WHEN the model answers / THEN the answer is grounded in the context and cites its source`; `GIVEN an unsafe input / WHEN the guardrail evaluates / THEN the request is refused with an explanation`; `GIVEN the eval set / WHEN run on the change / THEN the score is at or above the threshold` |
+| bi | `GIVEN a metric definition / WHEN the dashboard loads / THEN the value equals the source-of-truth query`; `GIVEN a stale source / WHEN data is older than its freshness limit / THEN the dashboard flags it` |
+| cli | `GIVEN an unknown flag / WHEN the command runs / THEN usage is printed to stderr and the exit code is 2`; `GIVEN stdin is piped / WHEN run non-interactively / THEN no prompt appears and input is consumed`; `GIVEN --json / WHEN the command succeeds / THEN stdout is valid JSON and logs go to stderr` |
+| library | `GIVEN a consumer calls a deprecated function / WHEN executed / THEN a deprecation warning names the replacement`; `GIVEN a minor release / WHEN a consumer upgrades / THEN existing public calls behave unchanged` |
 
 Produce the full ticket body with these sections:
 
@@ -2029,7 +2132,7 @@ Consider: resolve blockers, add tickets to the sprint, or create new tickets.
 
 ## MODE: start
 
-Accept a ticket reference and load it for exploration with full project doc context. Accepts `--no-branch` flag to skip branch creation.
+Accept a ticket reference and load it for exploration with full project doc context. By default, transitions the ticket to `in-progress` and creates its branch/worktree automatically, reporting what it did — it pauses for confirmation only when the **Shared: Start-Mode Pre-Flight Gate** fires. Accepts `--no-branch` to skip branch/worktree creation entirely, and `--confirm` to force the gate every time (restoring the always-ask behaviour for that one invocation).
 
 ### Step 1 — Parse ticket reference
 
@@ -2046,13 +2149,21 @@ Detect the input form and normalise to `(ticket_id, is_url)`:
 > "Jira requires a full key format. What is your project key prefix? (e.g. `PROJ`)"
 Reconstruct as `PREFIX-<number>` and continue.
 
-### Step 2 — Fetch ticket
+### Step 2 — Spawn fetch-and-prepare subagent
+
+Spawn a fresh subagent — not a context-inheriting fork, since this task needs only the ticket reference and resolved config, not the prior conversation — to fetch and enrich the ticket, evaluate the pre-flight gate, and (when the gate does not fire) perform the transition and branch/worktree creation itself. This keeps the fetch/enrichment tool-call noise out of the main thread; only the subagent's bounded result below returns here.
+
+**Inputs given to the subagent**: `ticket_id`, `is_url`, `provider.mcp_prefix`, `state_mapping`, `context_repos`, `docs_sources`, `wip_limit`, the `branching` config block, and the `--no-branch` / `--confirm` flags as passed by the user. No prior conversation history is passed.
+
+**What the subagent does, in order:**
+
+##### Step 2a — Fetch ticket
 
 Read `.project/config.yaml` for `provider.mcp_prefix`. No provider detection needed — the project is already configured.
 
 Emit `Fetching <id>…` before the call.
 
-Call the get-ticket tool from `tool_contracts.get_ticket` in `references/providers.json` using `{mcp_prefix}`. Collect: id, title, description, state (raw), labels, assignees, sprint membership, priority, issue_type, and all additional fields returned by the MCP response.
+Call the get-ticket tool from `tool_contracts.get_ticket` in `references/providers.json` using `{mcp_prefix}`. Collect: id, title, description, state (raw), labels, assignees, sprint membership, priority, issue_type, estimate, and all additional fields returned by the MCP response.
 
 Emit `✓ Loaded: "<title>"` on success.
 
@@ -2098,7 +2209,7 @@ else:
     comments_total = comments_shown = len(comments)
 ```
 
-Carry `priority_comments`, `comments_total`, and `comments_shown` forward to Step 6.
+Carry `priority_comments`, `comments_total`, and `comments_shown` forward for the context block (Step 4).
 
 #### Step 2c — Collect custom provider fields
 
@@ -2106,7 +2217,7 @@ After the `get_ticket` call, collect all fields returned by the MCP response tha
 
 If no custom fields are present, set `custom_fields = {}`.
 
-Carry `custom_fields` forward to Step 6.
+Carry `custom_fields` forward for the context block (Step 4).
 
 #### Step 2d — Scan for code cross-references
 
@@ -2130,7 +2241,7 @@ for r in refs:
 ticket_code_refs = ticket_code_refs[:10]
 ```
 
-Carry `ticket_code_refs` forward to Step 6.
+Carry `ticket_code_refs` forward for the context block (Step 4).
 
 #### Step 2e — Fetch linked issues (thin description only)
 
@@ -2149,53 +2260,53 @@ If the tool does not exist for the provider, or the call fails for any reason: s
 
 If `thin` is false: set `linked_issues = []` and skip the MCP call.
 
-Carry `linked_issues` forward to Step 6.
+Carry `linked_issues` forward for the context block (Step 4).
 
-### Step 3 — Project doc context (Context Fallback Chain)
+#### Step 2f — Project doc context (Context Fallback Chain)
 
-Follow the **Context Fallback Chain** defined in the Shared section above — identical logic to `ticket new`. Filter to sections relevant to the ticket's title and description topic. Build a `context_refs` list.
+Follow the **Context Fallback Chain** defined in the Shared section above — identical logic to `ticket new`. Filter to sections relevant to the ticket's title and description topic. Build a `context_refs` list, and separately count the number of **distinct (file, section) matches** found — carry this forward as `docs_breadth_match_count` for the gate (Step 2g). A match is one matched section in one doc file; three sections matched within a single file counts the same as one section each in three files.
 
 If all chain steps miss, emit:
 ```
 ⚠ No relevant context found — Context section may be incomplete.
 ```
+and set `docs_breadth_match_count = 0`.
 
-### Step 4 — State transition
+#### Step 2g — Evaluate the pre-flight gate
 
-Reverse-map the raw provider state to canonical state via `state_mapping`:
+Run **Shared: Start-Mode Pre-Flight Gate** using this ticket's `estimate`, `title`, `description`, the WIP check inputs (`wip_limit` from config, in-progress count from a `list_tickets` call), `docs_breadth_match_count` from Step 2f for the docs-breadth component, and `start.worktree` from config plus `git status --porcelain` for the dirty-tree condition. If `--confirm` was passed, treat the gate as fired regardless of the four conditions.
+
+Store the result as `gate_fired` (boolean) and, when true, `gate_reason` (the condition name(s) that fired, joined with "and").
+
+#### Step 2h — Transition and branch/worktree creation
+
+**If `gate_fired` is false**: perform the transition and branch/worktree creation now, using the logic below, then compose `action_summary` (e.g. `✓ TICK-42 → in-progress, worktree created at ../repo-TICK-42-oauth-login (branch feature/TICK-42-oauth-login from main)`) and return it along with the context fields collected in Steps 2a–2f.
+
+**If `gate_fired` is true**: perform no mutation. Determine (without executing) what the transition and branch/worktree creation *would* do — the target state, the branch name (Step 2h-ii below), and the base branch — and return this as `proposed_action`, along with `gate_fired: true`, `gate_reason`, and the context fields from Steps 2a–2f. Control returns to the main thread (Step 3) to ask the user before anything below actually runs.
+
+**(i) State transition.** Reverse-map the raw provider state via `state_mapping`:
 
 | Canonical state | Action |
 |---|---|
-| `todo` | Ask: "Move TICK-<id> to in-progress? [y/n]" → on Y run **WIP Limit Check** (below), then call `update_ticket` via the provider-specific path (see Step 4 provider branching below) |
-| `in-progress` | Silent no-op — already started (no WIP check needed — slot already occupied) |
-| `backlog` | Ask: "TICK-<id> is in backlog (not assigned to the active sprint). Move to in-progress? [y/n]" → on Y run **WIP Limit Check**, then call `update_ticket` via the provider-specific path (see Step 4 provider branching below); on N proceed to Step 5 without transition |
-| `in-review` or `done` | Warn: "TICK-<id> is already `<state>` — continuing in exploration mode." |
-| `blocked` | Warn: "TICK-<id> is blocked. Note the blocker before exploring." |
+| `todo` or `backlog` | call `update_ticket` via the provider-specific path below |
+| `in-progress` | no-op — already started |
+| `in-review` or `done` | no transition; note "TICK-<id> is already `<state>`" in `action_summary` / `proposed_action` |
+| `blocked` | no transition; note "TICK-<id> is blocked" in `action_summary` / `proposed_action` |
 
-**WIP Limit Check in start mode**: apply the same **Shared: WIP Limit Check** logic defined in `ticket update`. If user answers `n` to the WIP confirmation, output `Transition cancelled — continuing in exploration mode (ticket stays in current state).` and proceed to Step 5 without the state change. The `--no-branch` flag does NOT bypass the WIP check.
-
-**Provider-specific transition call** (for todo→in-progress and backlog→in-progress transitions):
+Provider-specific transition call:
 - **GitHub, Jira, Plane**: use **Shared: Provider Write Path Resolution** to call `update_ticket` with the translated state from `state_mapping`.
-- **GitLab**: use **Shared: Provider Write Path Resolution** + label-delta helper (same as `ticket update`) to add the new state label and remove the previous state label.
+- **GitLab**: use **Shared: Provider Write Path Resolution** + label-delta helper to add the new state label and remove the previous state label.
 
-### Step 5 — Branch creation
+**(ii) Branch/worktree creation.** Skip this entirely if `--no-branch` was passed — set `BRANCH_SKIPPED=true` and omit it from `action_summary` / `proposed_action`.
 
-> **Skip this step entirely if `--no-branch` was passed.** Set `BRANCH_SKIPPED=true` and go to Step 6.
+*Detect branching strategy*: read `branching` from `.project/config.yaml` first —
 
-#### Step 5a — Detect branching strategy
+| `branching.strategy` | Base branch for feature work |
+|---|---|
+| `single` | `branching.main` (default: `main`) |
+| `multi` | `branching.develop` (default: `develop`) |
 
-**1. Read `branching` from `.project/config.yaml` first.**
-
-If `branching` is present, use it directly and skip git topology detection:
-
-| `branching.strategy` | Base branch for feature work | Tell the user |
-|---|---|---|
-| `single` | `branching.main` (default: `main`) | "Config: single-branch — branching from `{main}`." |
-| `multi` | `branching.develop` (default: `develop`) | "Config: multi-branch — branching from `{develop}`. Merge path: {develop} → {staging if set} → {main}." |
-
-**2. If `branching` is absent**, fall back to git topology auto-detection:
-
-Run `git branch -a --format=%(refname:short)` and infer from topology:
+If `branching` is absent, fall back to git topology auto-detection via `git branch -a --format=%(refname:short)`:
 
 | Branch topology | Strategy | Base branch |
 |---|---|---|
@@ -2205,11 +2316,7 @@ Run `git branch -a --format=%(refname:short)` and infer from topology:
 | `release/*` branches, no develop | trunk-release | `main`/`master` |
 | No develop branch | single-branch | `main`/`master` |
 
-Tell the user: "Detected [strategy] — branching from `[base_branch]`."
-
-#### Step 5b — Derive branch name slug
-
-Apply this prompt to yourself:
+*Derive branch name slug*: apply this prompt to yourself:
 
 ```
 Issue title:       {ticket.title}
@@ -2225,27 +2332,36 @@ Rules:
 Slug:
 ```
 
-Determine branch prefix from `issue_type`:
-- `bug` → `bug/` (or `hotfix/` for gitflow strategies)
-- `feature`, `task`, `story`, or unknown → `feature/`
-- `hotfix` → `hotfix/`
+Determine branch prefix from `issue_type`: `bug` → `bug/` (or `hotfix/` for gitflow strategies); `feature`, `task`, `story`, or unknown → `feature/`; `hotfix` → `hotfix/`.
 
-Compose: `{prefix}{ticket.id}-{slug}` (e.g. `feature/PROJ-42-oauth-login`)
+Compose `BRANCH_NAME = {prefix}{ticket.id}-{slug}` (e.g. `feature/PROJ-42-oauth-login`) and `BASE_BRANCH` from the detection above.
 
-#### Step 5c — Confirm and create
+*Create the branch* (only when `gate_fired` is false, i.e. this is actually executing, not just proposing). Read `start.worktree` from `.project/config.yaml`; absent means `true`.
 
-Ask:
-```
-Ready to create branch:
-  [BRANCH_NAME]  (from [BASE_BRANCH])
-Create it now? [Y/n] — or type a different name to override.
-```
+- **`start.worktree` is `true` or absent** — create a worktree: let `repo_name` be the current directory's basename. Run:
+  ```
+  git worktree add ../{repo_name}-{ticket.id}-{slug} -b {BRANCH_NAME} {BASE_BRANCH}
+  ```
+  Set `WORKTREE_PATH` to the created path.
+- **`start.worktree` is `false`** — create the branch in place in the current checkout:
+  ```
+  git checkout -b {BRANCH_NAME} {BASE_BRANCH}
+  ```
+  Leave `WORKTREE_PATH` unset. A dirty working tree has already been surfaced by the gate, so no extra check runs here.
 
-- **Y** or Enter: run `git checkout [BASE_BRANCH] && git pull origin [BASE_BRANCH] && git checkout -b [BRANCH_NAME]`
-- **Custom name**: sanitize (`re.sub(r'[^a-z0-9/._-]', '-', name.lower()).strip('-')`) and create with that name
-- **n**: tell user "Skipping branch creation — continuing in exploration mode." Set `BRANCH_SKIPPED=true`.
+`--no-branch` takes precedence over `start.worktree`. On worktree failure (path or branch name collision), append a numeric suffix (`-2`, `-3`, ...) to the directory name and retry once; if it still fails — or if the in-place `git checkout -b` fails — report the git error, leave the ticket's state transition result unaffected, and set `BRANCH_SKIPPED=true`.
 
-### Step 6 — Assemble context block
+### Step 3 — Resolve the gate
+
+- **`gate_fired: false`** — print the subagent's `action_summary` and continue to Step 4. Nothing is asked.
+- **`gate_fired: true`** — ask the combined question from **Shared: Start-Mode Pre-Flight Gate**, using `gate_reason` and `proposed_action`:
+  ```
+  TICK-42 looks {gate_reason} — transition to in-progress and create its branch anyway? [y/n]
+  ```
+  - **y** — perform the transition and branch/worktree creation now, directly in the main thread, using the same logic as Step 2h(i)/(ii) above. Continue to Step 4.
+  - **n** — output `Transition cancelled — continuing in exploration mode (ticket stays in current state).`, set `BRANCH_SKIPPED=true`, and continue to Step 4 with no transition performed.
+
+### Step 4 — Assemble context block
 
 Build the context block:
 
@@ -2275,7 +2391,7 @@ Assignees:  [ticket.assignees joined by ", "]
 [ticket_code_refs, one per line — or "(none found)" if list is empty]
 
 --- Project Context ---
-[context_refs from Step 3, one block per matched source, e.g.:]
+[context_refs from Step 2f, one block per matched source, e.g.:]
 > Derived from docs/prd.md §Features — Token Refresh
 > Component: AuthService (docs/architecture.md §Components)
 > Entity: sessions (docs/database.md §Entities)
@@ -2291,14 +2407,19 @@ Recent commits:
 
 If `BRANCH_SKIPPED` is false, append:
 ```
-Branch:   [BRANCH_NAME]  (from [BASE_BRANCH])
+Branch:    [BRANCH_NAME]  (from [BASE_BRANCH])
+Worktree:  [WORKTREE_PATH]
 ```
 
-### Step 7 — Invoke opsx:explore
+If the branch was created in place (`start.worktree: false`), `WORKTREE_PATH` is unset: append only the `Branch:` line and omit the `Worktree:` line.
 
-#### Step 7a — Detect opsx:explore
+If `BRANCH_SKIPPED` is true (because `--no-branch` was passed, or the gate was declined, or branch creation failed), omit both lines entirely.
 
-Scan the `system-reminder` skills list for `opsx:explore`. If present, invoke it with the context block assembled in Step 6 and this prompt:
+### Step 5 — Invoke opsx:explore
+
+#### Step 5a — Detect opsx:explore
+
+Scan the `system-reminder` skills list for `opsx:explore`. If present, invoke it with the context block assembled in Step 4 and this prompt:
 
 ```
 I want to explore the implementation for this ticket before starting work:
@@ -2328,7 +2449,7 @@ base_ref: <output of: git rev-parse HEAD>
 Also scan `system-reminder` for `archive-ticket-sync`. If present and a `linked_issue` was written, note to the user:
 > "Ticket context stored. After implementation, run `/archive-ticket-sync` to post a summary to #<id> when you archive."
 
-#### Step 7b — Fallback if opsx:explore not loaded
+#### Step 5b — Fallback if opsx:explore not loaded
 
 Present the context block directly to the user, then offer:
 
@@ -2624,6 +2745,32 @@ Store: `current_branch`.
    - With ticket: `{ticket_id}: {type}: {title}`
    - Without ticket: `{type}: {title}`
 
+### Step 3b — Evidence plan
+
+Resolve what evidence this PR will carry. Read `project_type` (absent = `generic`) and `ship.evidence` from `.project/config.yaml`.
+
+**Kinds.** If `ship.evidence.kinds` is present it is the complete list and replaces the default. Otherwise use the default for `project_type`:
+
+| project_type | default kind |
+|---|---|
+| web, mobile, bi | `image` |
+| qa | `link` |
+| api | `markdown` |
+| cli, library, ai, microservices, generic | `text` |
+
+**Detection.** For every value not set in `ship.evidence`, detect it from the repo. Config always wins over detection. Never write detected values back to `.project/config.yaml`.
+
+| kind | value | how it is detected |
+|---|---|---|
+| `image` | `start_command` | `package.json` script `dev`, else `start` |
+| `image` | `base_url` | port found in that script or the framework config, as `http://localhost:{port}` (default `3000`) |
+| `image` | `viewports` | default `[375, 1280]` |
+| `markdown` | `spec_path` | first existing of `openapi.yaml`, `openapi.yml`, `openapi.json`, `docs/openapi.*`, `swagger.yaml`, `swagger.json` |
+| `link` | test tool | Playwright if `playwright.config.*` exists or `@playwright/test` is a dependency; Allure if `allure-results/` exists, `--alluredir` appears in test config, or an `allure` package is a dependency |
+| `link` | report source | in `.github/workflows/*` or `.gitlab-ci.yml`: `deploy-pages` or `allure generate` → published report; `upload-artifact` only → artifact (no browsable report). ReportPortal or Allure TestOps URLs in test config or CI files → hosted report service. `ship.evidence.link.report_url` overrides all of these |
+
+Store the result as `evidence_plan`: the kinds, each resolved value, and — for anything that could not be resolved — the reason (e.g. `OpenAPI spec not found`, `test tool not detected`).
+
 ### Step 4 — Confirmation
 
 Display:
@@ -2634,8 +2781,14 @@ Proposed commit:
 Branch: {current_branch} → {base_branch}
 PR title: {commit_message}
 
+Evidence:
+  kinds: {kinds joined by ", "}
+  {one line per kind}
+
 Proceed? [y / e to edit / n to abort]
 ```
+
+Per-kind line: `image` → `image: {start_command} @ {base_url}, viewports {viewports}`; `markdown` → `markdown: {spec_path}` or `markdown: OpenAPI spec not found`; `link` → `link: {tool} · {report source, or "CI runs page"}` or `link: test tool not detected`; `text` → `text: command transcript`.
 
 - **y** → proceed to Step 5
 - **e** → prompt `New message:` (single line); replace `commit_message`; re-display and ask `[y/n]`
@@ -2651,6 +2804,20 @@ git push -u origin {current_branch}
 
 On `git push` failure: emit the git error verbatim followed by `✗ Push failed — resolve conflicts or check remote permissions` and stop.
 
+### Step 5b — Produce evidence
+
+Runs after a successful push and before PR creation, and only when the provider hosts PRs (skip for Jira/Plane). Produce one `evidence_block` (markdown) per kind in `evidence_plan`. Evidence never blocks `ship`: on any failure the block is `No evidence captured: {reason}` and the flow continues.
+
+- **`text`** — a fenced transcript. For `cli`, run the commands the change affects (from the ticket's scenarios, else from the diff) and record each command, its output, and its exit code. For `library`, `ai`, `microservices`, and `generic`, run the project's test command (from `docs/tools.md`) and include its output; for `ai`, add sample inputs and outputs from the ticket's scenarios.
+- **`markdown`** — run `git diff {base_branch}...HEAD -- {spec_path}`. If the diff is empty but source files changed, the block is `spec unchanged`. Otherwise render each added or changed operation as `### {METHOD} {path}` followed by a parameters table, the request body (schema or example), and a responses table (status, schema or example). If `spec_path` is unresolved the block is `No evidence captured: OpenAPI spec not found`.
+- **`link`** — GitHub only; on GitLab the block is `No evidence captured: link evidence is GitHub-only`. Use `ship.evidence.link.report_url` if set. Otherwise, if a test tool was detected, link the branch's runs page `https://github.com/{owner}/{repo}/actions?query=branch%3A{current_branch}` labelled `CI run (report published on completion)` and name the detected tool. If no tool was detected and no `report_url` is set, the block is `No evidence captured: test tool not detected`. Never edit the PR after creation to add a report link.
+- **`image`** — GitHub only; on GitLab the block is `No evidence captured: image evidence is GitHub-only`. Start the app with `start_command`, wait up to 60 seconds for `base_url` to respond, then capture each added or changed page (from the ticket's scenarios, else the routes touched by the diff) at every viewport into a temporary directory, using the project's browser tooling (e.g. the `browser` skill or Playwright). Stop the app. If it does not start, or no pages were identified, the block is `No evidence captured: {reason}` (e.g. `no UI change detected`). Otherwise host the images on the orphan branch `pr-evidence`, never on the feature branch:
+  1. `git fetch origin pr-evidence` (ignore failure) and open a temporary worktree on it — `git worktree add {tmp} pr-evidence` when the branch exists, else `git worktree add --detach {tmp}` followed by `git checkout --orphan pr-evidence` and `git rm -rf .` inside it.
+  2. Copy the images into `{tmp}/{ticket_id or branch-slug}/`, commit, `git push origin pr-evidence`, read the pushed commit sha, then remove the temporary worktree.
+  3. Reference each image as `![{page} @ {viewport}px](https://github.com/{owner}/{repo}/blob/{sha}/{dir}/{file}?raw=true)`.
+
+Then append each string in `ship.evidence.extra` verbatim, one per line, after the generated blocks.
+
 ### Step 6 — PR creation
 
 Determine `base_branch`: read `base_branch` from `.project/config.yaml`; default to `main` if absent or file missing.
@@ -2661,24 +2828,86 @@ Determine `base_branch`: read `base_branch` from `.project/config.yaml`; default
 
 {if ticket_id known} Closes #{ticket_id}
 
----
-https://claude.ai/code/session_01LGsHbjx8qnfDnarVyuzVdG
+## Evidence
+{evidence blocks from Step 5b, then ship.evidence.extra strings}
 ```
+
+The `## Evidence` section is always present, even when it only reads `No evidence captured: {reason}`.
 
 For GitHub use `Closes #<number>` (numeric issue ID). For GitLab use `Closes <ticket_key>`.
 
 **GitHub** (`provider_name == "github"`):
 1. ToolSearch(`mcp__github__create_pull_request`) — if found, call with `title`, `body`, `head: current_branch`, `base: base_branch`.
 2. On duplicate-PR error (branch already has an open PR): extract existing URL from error, emit `ℹ PR already exists: {url}` and stop cleanly.
-3. On success: emit `✓ PR created: {pr_url}`
+3. On success: emit `✓ PR created: {pr_url}`, extract the PR number from `pr_url`, and continue to Step 7.
 
 **GitLab** (`provider_name == "gitlab"`):
 1. ToolSearch(`mcp__gitlab__create_merge_request`) — if found, call with equivalent fields.
 2. Same duplicate and success handling as GitHub.
+3. On success: stop. The PR watch offer in Step 7 is GitHub-only — do not offer it here.
 
 **Jira / Plane**: emit `ℹ {Provider} does not host PRs — pushed only` and stop.
 
 **No provider detected** or **MCP tool not found**: emit `ℹ No PR created — {reason}` where reason is `"provider not detected"` or `"MCP tool unavailable"`. Print the push URL so the user can open a PR manually.
+
+### Step 7 — Offer a PR watch (GitHub only)
+
+Only runs after a successful GitHub PR creation in Step 6. Skipped entirely for GitLab, Jira, Plane, no-provider, and MCP-unavailable outcomes.
+
+Ask:
+```
+Watch this PR for CI results and new comments until it's merged or closed? [y/n]
+```
+
+- **y** — invoke the `/loop` skill with the prompt `Run a pr-watch tick for PR #{pr_number} in {owner}/{repo}.`, so `/loop` schedules recurring ticks that each re-enter **MODE: pr-watch** (below) for this PR. Emit `✓ Watching PR #{pr_number} — stop anytime with /loop stop.` and continue.
+- **n** — emit nothing further; ship mode completes exactly as it did before this change.
+
+---
+
+## MODE: pr-watch
+
+**GitHub only** — this mode only watches GitHub Actions runs and GitHub PR comments. GitLab merge request pipelines are not covered. Runs one tick per invocation; scheduling across ticks is `/loop`'s job, not this mode's. Report-only: it never pushes a commit, re-runs a job, or replies to a comment on your behalf.
+
+Triggered by the `/loop` hand-off from ship mode's Step 7 (`Run a pr-watch tick for PR #{pr_number} in {owner}/{repo}.`), or directly by a user saying "watch PR #42" or "pr-watch 42".
+
+### Step 1 — Load per-PR state
+
+Read `.project/pr-watch/<pr-number>.yaml`. If absent, treat as:
+```yaml
+last_ci_run_id: null
+last_comment_id: null
+```
+
+### Step 2 — Check PR state first
+
+Call the GitHub MCP get-PR tool for `{owner}/{repo}#{pr_number}`. If its state is `merged` or `closed`:
+- `merged` → emit `✓ PR #{pr_number} merged — watch ending` 
+- `closed` (not merged) → emit `PR #{pr_number} closed without merging — watch ending`
+
+Either way, call `ScheduleWakeup` with `stop: true` — do not schedule another tick — and stop this mode. Do not proceed to Steps 3–5.
+
+If the PR is still open, continue to Step 3.
+
+### Step 3 — Fetch CI status for the head commit
+
+Call the GitHub MCP tool that lists check runs / workflow runs for the PR's current head commit SHA. Compare the latest run's ID to `last_ci_run_id`:
+- Same ID → no new CI result this tick.
+- Different ID (or `last_ci_run_id` was null) → this is a new run. If its conclusion is a failure, record it for Step 5. If the run has completed (any conclusion) and the project's evidence plan includes `link` (kinds from `ship.evidence.kinds`, else the `project_type` default — see **MODE: ship** Step 3b), also record it as the report source for Step 5. Update `last_ci_run_id` to this run's ID regardless of outcome (success or failure) so it isn't re-reported next tick.
+
+### Step 4 — Fetch new comments
+
+Call the GitHub MCP tools for PR review comments and issue comments. Filter to comments with ID greater than `last_comment_id` (or all comments, if `last_comment_id` is null — but on the very first tick, only record the latest ID as baseline rather than reporting pre-existing comments as "new"). Update `last_comment_id` to the highest comment ID seen.
+
+### Step 5 — Report findings, take no action
+
+- **New CI failure found**: report the run name, the failing job, and a link — e.g. `✗ CI failed on PR #42: {job name} — {run_url}`. Do not push a commit, do not re-trigger the run.
+- **New comment(s) found**: report each as `[author]: body` (truncate body to ~300 chars). Do not reply.
+- **Completed run with `link` evidence**: report `ℹ Test report for PR #{pr_number}: {url}`, where `{url}` is `ship.evidence.link.report_url` if set, else the run's URL. Report it once per run. Do not edit the PR body or comment on the PR.
+- **Neither**: this is a quiet tick — report nothing new, per `/loop`'s own no-op convention.
+
+### Step 6 — Persist state and schedule next tick
+
+Write the updated `last_ci_run_id` and `last_comment_id` to `.project/pr-watch/<pr-number>.yaml`. Call `ScheduleWakeup` with `stop: false` and a delay appropriate to how often PR activity actually changes (do not poll faster than roughly once a minute) to schedule the next tick.
 
 ---
 

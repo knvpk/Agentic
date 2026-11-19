@@ -256,6 +256,11 @@ start — load a ticket, auto-start it, and open explore mode
   ticket-breakdown heuristic), its estimate is larger than 5, or (in-place mode)
   the working tree has uncommitted changes.
 
+  Also creates the OpenSpec change for the ticket (linked to it) before explore,
+  and explore must end with a verdict. `needs-input` stops here: the blocking
+  questions are posted to the ticket and recorded in design.md, and re-running
+  `start` on the same ticket resumes once they are answered.
+
   Flags:
     --no-branch   Skip branch/worktree creation; continue in exploration mode only
     --confirm     Force the combined confirmation every time, even if nothing
@@ -2299,6 +2304,8 @@ Provider-specific transition call:
 
 **(ii) Branch/worktree creation.** Skip this entirely if `--no-branch` was passed — set `BRANCH_SKIPPED=true` and omit it from `action_summary` / `proposed_action`.
 
+*Resume guard*: if a non-archived change with `linked_issue.id` equal to this ticket's id already exists (see Step 3b), or `git worktree list` / `git branch --list "*{ticket.id}-*"` shows a branch or worktree for this ticket, this is a resume — create nothing, set `BRANCH_SKIPPED=true`, report the existing branch/worktree in `action_summary` (`↻ resuming TICK-42 on existing branch …`), and skip the numeric-suffix retry below.
+
 *Detect branching strategy*: read `branching` from `.project/config.yaml` first —
 
 | `branching.strategy` | Base branch for feature work |
@@ -2361,6 +2368,26 @@ Compose `BRANCH_NAME = {prefix}{ticket.id}-{slug}` (e.g. `feature/PROJ-42-oauth-
   - **y** — perform the transition and branch/worktree creation now, directly in the main thread, using the same logic as Step 2h(i)/(ii) above. Continue to Step 4.
   - **n** — output `Transition cancelled — continuing in exploration mode (ticket stays in current state).`, set `BRANCH_SKIPPED=true`, and continue to Step 4 with no transition performed.
 
+### Step 3b — Create or resume the change shell
+
+The handoff to explore is a file on disk. Before Step 5, make sure an OpenSpec change exists for this ticket. Run these commands inside `WORKTREE_PATH` when a worktree was created, otherwise in the current checkout.
+
+1. Look for a non-archived change whose `openspec/changes/*/.openspec.yaml` has `linked_issue.id` equal to this ticket's id.
+2. **Found** — reuse it; never create a second change for the same ticket. If its `.openspec.yaml` has `status: awaiting-answers`, this is a resume: set `RESUMING=true` and skip to Step 5c.
+3. **Not found** — run `openspec new change "{ticket.id}-{slug}"` (same slug as the branch name), then write into its `.openspec.yaml`:
+   ```yaml
+   linked_issue:
+     provider: <provider from config>
+     project_ref: <project path or key from config>
+     id: "<ticket id>"
+     url: <ticket URL>
+   base_ref: <output of: git rev-parse HEAD>
+   ```
+
+This runs whether or not the gate was declined or `--no-branch` was passed — exploration is always anchored to the ticket. If `openspec` is not installed, emit `⚠ openspec CLI not found — cannot create the change shell` and continue to Step 5b.
+
+On a resume, Step 2h's transition and branch/worktree creation must not run a second time: the subagent reports `already in-progress` and the existing worktree, and Step 3 prints that without mutating anything.
+
 ### Step 4 — Assemble context block
 
 Build the context block:
@@ -2419,7 +2446,7 @@ If `BRANCH_SKIPPED` is true (because `--no-branch` was passed, or the gate was d
 
 #### Step 5a — Detect opsx:explore
 
-Scan the `system-reminder` skills list for `opsx:explore`. If present, invoke it with the context block assembled in Step 4 and this prompt:
+Scan the `system-reminder` skills list for `opsx:explore`. If present, invoke it with the context block assembled in Step 4 and this prompt (the change from Step 3b is `<change-name>`):
 
 ```
 I want to explore the implementation for this ticket before starting work:
@@ -2432,22 +2459,23 @@ Ticket context for linked issue tracking:
   id: "<ticket id>"
   url: <ticket URL>
 
-Let's think through: requirements, ambiguities, edge cases, and which parts of the codebase are likely involved.
+The OpenSpec change `<change-name>` already exists for this ticket. Explore the
+requirements, ambiguities, edge cases, and which parts of the codebase are likely
+involved. Do NOT edit application code in this session.
+
+You MUST finish by writing these sections into openspec/changes/<change-name>/design.md:
+  ## Verdict        — exactly `ready` or `needs-input`
+  ## Assumptions    — every uncertainty that does not need an answer to proceed
+  ## Open Questions — only when the verdict is `needs-input`
+
+A question is blocking (→ `needs-input`) ONLY if its answer would change scope,
+design, or a spec scenario. Everything else is an assumption, not a question.
 ```
 
-After the explore session ends (or when the user moves to implementation), check if a new change was created under `openspec/changes/`. If a new `.openspec.yaml` exists without a `linked_issue` block, write it now:
-
-```yaml
-linked_issue:
-  provider: <provider from config>
-  project_ref: <project_ref from config>
-  id: "<ticket id>"
-  url: <ticket URL>
-base_ref: <output of: git rev-parse HEAD>
-```
-
-Also scan `system-reminder` for `archive-ticket-sync`. If present and a `linked_issue` was written, note to the user:
+Also scan `system-reminder` for `archive-ticket-sync`. If present, note to the user:
 > "Ticket context stored. After implementation, run `/archive-ticket-sync` to post a summary to #<id> when you archive."
+
+Continue to Step 5c.
 
 #### Step 5b — Fallback if opsx:explore not loaded
 
@@ -2461,12 +2489,47 @@ What would you like to do?
   2. List open questions, ambiguities, and edge cases
   3. Summarise what needs to be implemented
   4. Check for related branches or PRs
-  5. Start implementing now
+  5. Create a change for this ticket (artifacts first, then implement)
 
 Reply with a number, or ask anything about the ticket.
 ```
 
-Wait for the user's reply and act on it directly.
+Wait for the user's reply and act on it directly. Option 5 creates the change artifacts (proposal, specs, design, tasks) before any application code is touched; never offer to implement without a change. Option 2 output is recorded in the change's `design.md` as `## Open Questions` / `## Assumptions`, and Step 5c then applies.
+
+#### Step 5c — Resolve the verdict
+
+Read `openspec/changes/<change-name>/design.md` (in `WORKTREE_PATH` when set).
+
+- **On resume** (`RESUMING=true`): fold new answers into `design.md` first — from the user's reply in this session, plus any ticket comments newer than the `awaiting-answers` comment — moving each answered item out of `## Open Questions` into `## Assumptions` (or into the design/spec text it affects). Then re-evaluate: still-blocking questions remain → `needs-input`; none → `ready`.
+- **No `## Verdict` section**: re-prompt once — `Write the ## Verdict section (ready | needs-input) to design.md before continuing.` If it is still missing, treat as `needs-input` with the open question `Explore ended without a verdict`.
+- **`ready`** — if `.openspec.yaml` has `status: awaiting-answers`, remove it. Tell the user:
+  > "Explore complete — verdict: ready. Next: `/opsx:ff` (or `/opsx:continue`) to create the remaining artifacts."
+- **`needs-input`** — stop this ticket's pipeline, in this order:
+  1. Post **one** comment on the ticket via **Shared: Provider Write Path Resolution**, containing only the blocking questions from `## Open Questions`.
+  2. Set `status: awaiting-answers` in the change's `.openspec.yaml`.
+  3. Emit `⏸ TICK-42 needs input — N question(s) posted to the ticket and recorded in openspec/changes/<change-name>/design.md. Re-run /project-management start TICK-42 once answered.`
+  4. Do not begin implementation or create further artifacts.
+
+#### Edit guard (optional hook)
+
+`start` never writes settings. To make "no edits without a change" harness-enforced, add this to `.claude/settings.json` (or `settings.local.json`):
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          { "type": "command", "command": "bash skills/project-management/scripts/require-change.sh" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The script blocks an edit when the current branch carries a ticket id and no non-archived change has a matching `linked_issue.id`. It always allows paths under `openspec/changes/` and branches with no ticket id.
 
 ---
 

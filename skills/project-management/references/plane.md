@@ -37,7 +37,7 @@ claude mcp add plane --scope project --transport http https://plane.company.com/
 | Sub-issues | ✓ | ✓ |
 | Custom states | ✓ | ✓ |
 
-The skill probes `list_modules` at init. If it returns 200 → Modules available (all plans). The skill separately probes for the Epic work item type (Pro-only); if unavailable, label fallback is activated. On free plan, `active_cycles_limit: 1` is stored in config.
+The skill probes `list_modules` at init. If it returns 200 → Modules available (all plans). The skill separately probes for the Epic work item type (Pro-only); the Epic type is not used either way; modules are the epic mechanism. On free plan, `active_cycles_limit: 1` is stored in config.
 
 ## Sprint Model (Cycles)
 
@@ -52,14 +52,13 @@ Status:   GET  /api/v1/workspaces/{slug}/projects/{id}/cycles/{id}/cycle-issues/
 
 ## Epic Model (Modules)
 
-Plane calls epics **Modules** (available on Pro+). Issues are linked to modules.
+Plane epics are **Modules** (available on all plans). Never create epic tickets (no `[Epic]` work items) or `epic:` labels; every ticket in an epic is added to its module.
 
 ```
 Create:   POST /api/v1/workspaces/{slug}/projects/{id}/modules/
 Add:      POST /api/v1/workspaces/{slug}/projects/{id}/modules/{module_id}/module-issues/
 ```
 
-**Free plan fallback**: label `epic:{slug}` applied to all child issues.
 
 ## State Model
 
@@ -92,5 +91,5 @@ Create:   POST /api/v1/workspaces/{slug}/projects/{id}/issues/{issue_id}/issue-r
 
 1. Add Plane MCP server with `PLANE_API_TOKEN`, `PLANE_WORKSPACE_SLUG`, `PLANE_PROJECT_ID`
 2. Run `/project-management init`
-3. Init probes `list_modules` → if 403, activates label fallback and notifies you
+3. Init probes `list_modules`
 4. Init maps Plane state names to canonical states

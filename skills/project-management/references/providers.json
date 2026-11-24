@@ -400,9 +400,8 @@
       },
       "fallbacks": {
         "epics": {
-          "strategy": "label",
-          "label_prefix": "epic:",
-          "description_note": "Part of epic: {slug}"
+          "strategy": "module",
+          "description_note": "Epic = Plane module. Never create epic tickets or epic labels."
         },
         "milestone": {
           "strategy": "label",
